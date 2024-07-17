@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net7.0-windows</TargetFramework>
+    <AssemblyName>Flow.Launcher.Plugin.BitwardenSearch</AssemblyName>
+    <PackageId>Flow.Launcher.Plugin.BitwardenSearch</PackageId>
+    <RootNamespace>Flow.Launcher.Plugin.BitwardenSearch</RootNamespace>
+    <Authors>YourName</Authors>
+    <PackageProjectUrl>https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch</RepositoryUrl>
+    <PackageTags>flow-launcher flow-plugin</PackageTags>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
+    <UseWPF>true</UseWPF>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Platforms>x64</Platforms>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <EnableDefaultPageItems>false</EnableDefaultPageItems>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <DebugSymbols>false</DebugSymbols>
+    <DebugType>None</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="plugin.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="Images\bitwarden.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Flow.Launcher.Plugin" Version="4.3.0" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Include="BitwardenFlowSettingPanel.xaml" />
+    <Page Include="UriListWindow.xaml" />
+    <Compile Update="BitwardenFlowSettingPanel.xaml.cs">
+      <DependentUpon>BitwardenFlowSettingPanel.xaml</DependentUpon>
+    </Compile>
+    <Compile Update="UriListWindow.xaml.cs">
+      <DependentUpon>UriListWindow.xaml</DependentUpon>
+    </Compile>
+  </ItemGroup>
+
+  <Target Name="CopyPluginToFlowLauncherDirectory" AfterTargets="Build">
+    <PropertyGroup>
+      <FlowLauncherPluginsDirectory Condition="'$(FlowLauncherPluginsDirectory)' == ''">$([System.Environment]::GetEnvironmentVariable('FLOW_LAUNCHER_PLUGIN_DIR'))</FlowLauncherPluginsDirectory>
+      <FlowLauncherPluginsDirectory Condition="'$(FlowLauncherPluginsDirectory)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))\FlowLauncher\app-1.18.0\Plugins\</FlowLauncherPluginsDirectory>
+    </PropertyGroup>
+    <Message Text="Copying plugin to $(FlowLauncherPluginsDirectory)Flow.Launcher.Plugin.BitwardenSearch" Importance="high" />
+    <ItemGroup>
+      <PluginFiles Include="$(OutputPath)**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(FlowLauncherPluginsDirectory)Flow.Launcher.Plugin.BitwardenSearch\%(RecursiveDir)" />
+  </Target>
+</Project>
