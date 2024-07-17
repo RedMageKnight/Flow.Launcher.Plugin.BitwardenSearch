@@ -386,27 +386,34 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 foreach (var item in items)
                 {
-                    if (_currentResults.TryGetValue(item.id, out var cachedResult))
+                    var mainResult = new Result
                     {
-                        results.Add(cachedResult);
-                    }
-                    else
-                    {
-                        var newResult = new Result
-                        {
-                            Title = item.name,
-                            SubTitle = BuildSubTitle(item),
-                            IcoPath = "Images/bitwarden.png", // Use default icon initially
-                            Action = context => HandleItemAction(context, item)
-                        };
-                        results.Add(newResult);
-                        _currentResults[item.id] = newResult;
+                        Title = item.name,
+                        SubTitle = BuildSubTitle(item),
+                        IcoPath = "Images/bitwarden.png", // Use default icon initially
+                        Action = context => HandleItemAction(context, item, ActionType.Default)
+                    };
+                    results.Add(mainResult);
 
-                        // Start favicon download asynchronously
-                        _ = Task.Run(() => UpdateFaviconAsync(item, newResult));
+                    Logger.Log($"Processing item: {item.name}, hasTotp: {item.hasTotp}", LogLevel.Debug);
+
+                    if (item.hasTotp == true)
+                    {
+                        Logger.Log($"Adding TOTP result for item: {item.name}", LogLevel.Debug);
+                        results.Add(new Result
+                        {
+                            Title = $"Copy TOTP for {item.name}",
+                            SubTitle = "Click to copy TOTP code",
+                            IcoPath = "Images/totp.png", // Ensure you have this icon
+                            Action = context => HandleItemAction(context, item, ActionType.CopyTotp)
+                        });
                     }
+
+                    // Start favicon download asynchronously
+                    _ = Task.Run(() => UpdateFaviconAsync(item, mainResult));
                 }
 
+                Logger.Log($"Total results generated: {results.Count}", LogLevel.Debug);
                 return results;
             }
             catch (TaskCanceledException)
@@ -434,19 +441,32 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private bool HandleItemAction(ActionContext context, BitwardenItem item)
+        private enum ActionType
         {
-            if (context.SpecialKeyState.CtrlPressed && context.SpecialKeyState.ShiftPressed)
+            Default,
+            CopyTotp
+        }
+
+        private bool HandleItemAction(ActionContext context, BitwardenItem item, ActionType actionType)
+        {
+            switch (actionType)
             {
-                return ShowUriListPopup(item);
-            }
-            else if (context.SpecialKeyState.CtrlPressed)
-            {
-                CopyToClipboard(item.login?.username, "Username");
-            }
-            else
-            {
-                CopyToClipboard(item.login?.password, "Password");
+                case ActionType.CopyTotp:
+                    return CopyTotpCode(item);
+                case ActionType.Default:
+                    if (context.SpecialKeyState.CtrlPressed && context.SpecialKeyState.ShiftPressed)
+                    {
+                        return ShowUriListPopup(item);
+                    }
+                    else if (context.SpecialKeyState.CtrlPressed)
+                    {
+                        CopyToClipboard(item.login?.username, "Username");
+                    }
+                    else
+                    {
+                        CopyToClipboard(item.login?.password, "Password");
+                    }
+                    break;
             }
             return true;
         }
@@ -478,20 +498,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             if (!string.IsNullOrEmpty(item.login?.username))
             {
-                parts.Add($"Username: {item.login.username}");
+                parts.Add($"User: {item.login.username}");
             }
 
             if (item.login?.uris != null && item.login.uris.Any())
             {
-                var uriPart = item.login.uris.Count == 1
-                    ? $"URL: {item.login.uris[0].uri}"
-                    : $"URLs: {item.login.uris.Count}";
-                parts.Add(uriPart);
+                parts.Add($"URLs: {item.login.uris.Count}");
             }
 
-            if (parts.Count == 0)
+            if (item.hasTotp == true)
             {
-                return "No additional information available";
+                parts.Add("TOTP Available");
             }
 
             return string.Join(" | ", parts);
@@ -560,7 +577,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log($"Sending request to: {url}", LogLevel.Debug);
 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                cts.CancelAfter(TimeSpan.FromSeconds(20)); // Single 20-second timeout
+                cts.CancelAfter(TimeSpan.FromSeconds(20));
 
                 var response = await _httpClient.GetAsync(url, cts.Token);
                 
@@ -582,7 +599,21 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return new List<BitwardenItem>();
                 }
 
-                var items = dataArray.ToObject<List<BitwardenItem>>() ?? new List<BitwardenItem>();
+                var items = new List<BitwardenItem>();
+                foreach (var item in dataArray)
+                {
+                    var bitwardenItem = item.ToObject<BitwardenItem>();
+                    if (bitwardenItem != null)
+                    {
+                        // Check if the item has a non-null and non-empty TOTP
+                        var totpToken = item["login"]?["totp"]?.ToString();
+                        bitwardenItem.hasTotp = !string.IsNullOrWhiteSpace(totpToken);
+                        
+                        Logger.Log($"Item: {bitwardenItem.name}, HasTotp: {bitwardenItem.hasTotp}", LogLevel.Debug);
+                        
+                        items.Add(bitwardenItem);
+                    }
+                }
 
                 Logger.Log($"Found {items.Count} items matching the search term", LogLevel.Debug);
                 return items;
@@ -703,6 +734,46 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log($"Failed to download favicon for {domain} after {maxRetries} attempts. Using default icon.", LogLevel.Info);
             return "Images/bitwarden.png";
         }
+
+        private bool CopyTotpCode(BitwardenItem item)
+        {
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var totpCode = await GetTotpCodeAsync(item.id);
+                    if (!string.IsNullOrEmpty(totpCode))
+                    {
+                        CopyToClipboard(totpCode, "TOTP Code");
+                    }
+                    else
+                    {
+                        _context.API.ShowMsg("No TOTP Code", "This item does not have a TOTP code associated with it.");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError("Error fetching TOTP code", ex);
+                    _context.API.ShowMsg("Error", "Failed to fetch TOTP code. Check logs for details.");
+                }
+            });
+            return true;
+        }
+
+        private async Task<string> GetTotpCodeAsync(string itemId)
+        {
+            var url = $"{ApiBaseUrl}/object/totp/{itemId}";
+            var response = await _httpClient.GetAsync(url);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var jObject = JObject.Parse(responseContent);
+                return jObject["data"]?["data"]?.ToString() ?? string.Empty;
+            }
+            
+            return string.Empty;
+        }
     }
 
     public class BitwardenItem
@@ -710,6 +781,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public string id { get; set; } = string.Empty;
         public string name { get; set; } = string.Empty;
         public BitwardenLogin? login { get; set; }
+        public bool? hasTotp { get; set; }
     }
 
     public class BitwardenLogin
