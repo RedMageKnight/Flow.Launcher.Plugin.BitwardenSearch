@@ -1,0 +1,20 @@
+<Window x:Class="Flow.Launcher.Plugin.BitwardenSearch.UriListWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="URIs" Height="300" Width="400" WindowStartupLocation="CenterScreen"
+        KeyDown="Window_KeyDown">
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <TextBlock x:Name="TitleTextBlock" FontWeight="Bold" Margin="0,0,0,10"/>
+        <ListBox x:Name="UriListBox" Grid.Row="1" 
+                 KeyDown="UriListBox_KeyDown"
+                 MouseDoubleClick="UriListBox_MouseDoubleClick"/>
+        <TextBlock Grid.Row="2" Margin="0,10,0,0" TextAlignment="Center">
+            Press Enter to copy selected URI or Esc to close
+        </TextBlock>
+    </Grid>
+</Window>

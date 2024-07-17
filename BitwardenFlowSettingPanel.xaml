@@ -1,0 +1,46 @@
+<UserControl x:Class="Flow.Launcher.Plugin.BitwardenSearch.BitwardenFlowSettingPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             mc:Ignorable="d" 
+             d:DesignHeight="450" d:DesignWidth="800">
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="20"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        
+        <TextBlock Grid.Row="0" Grid.Column="0" Text="Client ID:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+        <TextBox Grid.Row="0" Grid.Column="1" x:Name="ClientIdTextBox" TextChanged="ClientIdTextBox_TextChanged"/>
+        
+        <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+        <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" PasswordChanged="ClientSecretBox_PasswordChanged"/>
+
+        <TextBlock Grid.Row="4" Grid.Column="0" Text="Master Password:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+        <PasswordBox Grid.Row="4" Grid.Column="1" x:Name="MasterPasswordBox" PasswordChanged="MasterPasswordBox_PasswordChanged"/>
+        
+        <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" TextWrapping="Wrap">
+            Enter your Bitwarden API client_id and client_secret in the fields above. This can be attained by navigating to Bitwarden --> Account Settings --> Security --> Keys --> View API key. The master password is your Bitwarden vault password.
+        </TextBlock>
+
+        <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Vertical">
+            <TextBlock Text="Log Levels:" FontWeight="Bold" Margin="0,0,0,5"/>
+            <CheckBox x:Name="LogDebugCheckBox" Content="Debug" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogInfoCheckBox" Content="Info" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogWarningCheckBox" Content="Warning" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogErrorCheckBox" Content="Error" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+        </StackPanel>
+    </Grid>
+</UserControl>

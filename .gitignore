@@ -1,0 +1,33 @@
+# Visual Studio cache/options directory
+   .vs/
+   
+   # Build results
+   [Dd]ebug/
+   [Rr]elease/
+   x64/
+   [Bb]in/
+   [Oo]bj/
+   
+   # User-specific files
+   *.suo
+   *.user
+   *.userosscache
+   *.sln.docstates
+   
+   # Visual Studio profiler
+   *.psess
+   *.vsp
+   *.vspx
+   *.sap
+   
+   # ReSharper
+   _ReSharper*/
+   *.[Rr]e[Ss]harper
+   *.DotSettings.user
+   
+   # NuGet Packages
+   *.nupkg
+   # The packages folder can be ignored because of Package Restore
+   **/packages/*
+   # except build/, which is used as an MSBuild target.
+   !**/packages/build/
