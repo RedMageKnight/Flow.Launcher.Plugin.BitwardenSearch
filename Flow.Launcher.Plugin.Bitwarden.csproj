@@ -45,11 +45,15 @@
   <ItemGroup>
     <Page Include="BitwardenFlowSettingPanel.xaml" />
     <Page Include="UriListWindow.xaml" />
+    <Page Include="PasswordInputWindow.xaml" />
     <Compile Update="BitwardenFlowSettingPanel.xaml.cs">
       <DependentUpon>BitwardenFlowSettingPanel.xaml</DependentUpon>
     </Compile>
     <Compile Update="UriListWindow.xaml.cs">
       <DependentUpon>UriListWindow.xaml</DependentUpon>
+    </Compile>
+    <Compile Update="PasswordInputWindow.xaml.cs">
+      <DependentUpon>PasswordInputWindow.xaml</DependentUpon>
     </Compile>
   </ItemGroup>
 

@@ -29,6 +29,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private CancellationTokenSource _debounceTokenSource;
         private PluginInitContext _context = null!;
         private BitwardenFlowSettings _settings = null!;
+        private bool _isLocked = false;
 
         public Main()
         {
@@ -81,6 +82,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             // Initialize logger
             Logger.Initialize(pluginDirectory, _settings);
             Logger.Log("Plugin initialization started", LogLevel.Info);
+
+            // Add new action keywords programmatically
+            string pluginId = context.CurrentPluginMetadata.ID;
+            context.API.AddActionKeyword(pluginId, "bwlock");
+            context.API.AddActionKeyword(pluginId, "bwunlock");
+
+            Logger.Log($"Added action keywords: bwlock, bwunlock for plugin ID: {pluginId}", LogLevel.Info);
 
             // Start the initialization process
             _ = Task.Run(async () =>
@@ -316,7 +324,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private void UpdateHttpClientAuthorization()
         {
-            if (!string.IsNullOrEmpty(_settings.SessionKey))
+            if (!_isLocked && !string.IsNullOrEmpty(_settings.SessionKey))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.SessionKey.Trim());
                 Logger.Log("Session key updated", LogLevel.Info);
@@ -324,12 +332,104 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             else
             {
                 _httpClient.DefaultRequestHeaders.Authorization = null;
-                Logger.Log("Session key cleared", LogLevel.Info);
+                Logger.Log("Authorization cleared due to locked state or missing session key", LogLevel.Info);
             }
         }
 
         public async Task<List<Result>> QueryAsync(Query query, CancellationToken token)
         {
+            Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: {query.Search}", LogLevel.Debug);
+
+            if (query.ActionKeyword.ToLower() == "bwlock")
+            {
+                Logger.Log("Executing LockVault", LogLevel.Debug);
+                return LockVault();
+            }
+            else if (query.ActionKeyword.ToLower() == "bwunlock")
+            {
+                Logger.Log("Executing UnlockVault", LogLevel.Debug);
+                return await UnlockVault(query.Search);
+            }
+            else if (query.ActionKeyword.ToLower() == "bw")
+            {
+                Logger.Log("Executing HandleBitwardenSearch", LogLevel.Debug);
+                return await HandleBitwardenSearch(query, token);
+            }
+
+            Logger.Log($"No matching action keyword found for: {query.ActionKeyword}", LogLevel.Warning);
+            return new List<Result>();
+        }
+
+        private async Task<List<Result>> HandleBitwardenSearch(Query query, CancellationToken token)
+        {
+            if (query.FirstSearch?.ToLower() == "/lock")
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Lock Bitwarden Vault",
+                        SubTitle = "Press Enter to confirm locking the vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            var lockResults = LockVault();
+                            _context.API.ChangeQuery(""); // Clear the query after locking
+                            return true;
+                        }
+                    }
+                };
+            }
+            else if (query.FirstSearch?.ToLower() == "/unlock")
+            {
+                if (string.IsNullOrEmpty(query.SecondSearch))
+                {
+                    return new List<Result>
+                    {
+                        new Result
+                        {
+                            Title = "Unlock Bitwarden Vault",
+                            SubTitle = "Enter your master password and press Enter to unlock",
+                            IcoPath = "Images/bitwarden.png"
+                        }
+                    };
+                }
+                else
+                {
+                    return new List<Result>
+                    {
+                        new Result
+                        {
+                            Title = "Unlock Bitwarden Vault",
+                            SubTitle = "Press Enter to confirm unlocking with the provided password",
+                            IcoPath = "Images/bitwarden.png",
+                            Action = _ => 
+                            {
+                                Task.Run(async () =>
+                                {
+                                    var unlockResults = await UnlockVault(query.SecondSearch);
+                                    _context.API.ChangeQuery(""); // Clear the query after unlocking
+                                });
+                                return true;
+                            }
+                        }
+                    };
+                }
+            }
+
+            if (_isLocked)
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Bitwarden vault is locked",
+                        SubTitle = "Use 'bw /unlock <password>' to unlock",
+                        IcoPath = "Images/bitwarden.png"
+                    }
+                };
+            }
+
             if (!_isInitialized)
             {
                 return new List<Result>
@@ -352,6 +452,28 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         Title = "Search Bitwarden",
                         SubTitle = "Type to search your Bitwarden vault",
                         IcoPath = "Images/bitwarden.png"
+                    },
+                    new Result
+                    {
+                        Title = "/lock",
+                        SubTitle = "Lock your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /lock");
+                            return false;
+                        }
+                    },
+                    new Result
+                    {
+                        Title = "/unlock",
+                        SubTitle = "Unlock your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /unlock ");
+                            return false;
+                        }
                     }
                 };
             }
@@ -404,7 +526,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         {
                             Title = $"Copy TOTP for {item.name}",
                             SubTitle = "Click to copy TOTP code",
-                            IcoPath = "Images/totp.png", // Ensure you have this icon
+                            IcoPath = "Images/totp.png",
                             Action = context => HandleItemAction(context, item, ActionType.CopyTotp)
                         });
                     }
@@ -436,6 +558,105 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                             _context.API.OpenSettingDialog();
                             return true;
                         }
+                    }
+                };
+            }
+        }
+
+        private List<Result> LockVault()
+        {
+            _isLocked = true;
+            _settings.SessionKey = string.Empty;
+            _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+            UpdateHttpClientAuthorization();
+
+            return new List<Result>
+            {
+                new Result
+                {
+                    Title = "Bitwarden vault locked",
+                    SubTitle = "Use 'bw /unlock <password>' to unlock",
+                    IcoPath = "Images/bitwarden.png"
+                }
+            };
+        }
+
+        private async Task<List<Result>> UnlockVault(string password)
+        {
+            if (string.IsNullOrEmpty(password))
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Enter your master password",
+                        SubTitle = "Type your password after 'bw /unlock'",
+                        IcoPath = "Images/bitwarden.png"
+                    }
+                };
+            }
+
+            try
+            {
+                // Use the entered master password to unlock the vault
+                var unlockProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = "unlock --raw",
+                        UseShellExecute = false,
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+                unlockProcess.Start();
+
+                await unlockProcess.StandardInput.WriteLineAsync(password);
+                await unlockProcess.StandardInput.FlushAsync();
+
+                string sessionKey = await unlockProcess.StandardOutput.ReadToEndAsync();
+
+                if (string.IsNullOrWhiteSpace(sessionKey))
+                {
+                    return new List<Result>
+                    {
+                        new Result
+                        {
+                            Title = "Failed to unlock vault",
+                            SubTitle = "Incorrect password or server error",
+                            IcoPath = "Images/bitwarden.png"
+                        }
+                    };
+                }
+
+                _settings.SessionKey = sessionKey.Trim();
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                UpdateHttpClientAuthorization();
+                _isLocked = false;
+
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Bitwarden vault unlocked",
+                        SubTitle = "You can now search for your items",
+                        IcoPath = "Images/bitwarden.png"
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Failed to unlock Bitwarden vault", ex);
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Error unlocking vault",
+                        SubTitle = "Check logs for details",
+                        IcoPath = "Images/bitwarden.png"
                     }
                 };
             }

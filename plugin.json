@@ -8,5 +8,6 @@
   "Language": "csharp",
   "Website": "https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch",
   "ExecuteFileName": "Flow.Launcher.Plugin.BitwardenSearch.dll",
-  "IcoPath": "Images\\bitwarden.png"
+  "IcoPath": "Images\\bitwarden.png",
+  "ActionKeywords": ["bw"]
 }
