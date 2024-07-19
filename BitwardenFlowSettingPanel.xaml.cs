@@ -23,7 +23,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             
             ClientIdTextBox.Text = _settings.ClientId;
             ClientSecretBox.Password = _settings.ClientSecret;
-            MasterPasswordBox.Password = _settings.MasterPassword;
             
             LogDebugCheckBox.IsChecked = _settings.LogDebug;
             LogInfoCheckBox.IsChecked = _settings.LogInfo;
@@ -49,15 +48,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             if (_settings != null && _settings.ClientSecret != ClientSecretBox.Password)
             {
                 _settings.ClientSecret = ClientSecretBox.Password;
-                _updateSettings?.Invoke(_settings);
-            }
-        }
-
-        private void MasterPasswordBox_PasswordChanged(object sender, RoutedEventArgs e)
-        {
-            if (_settings != null && _settings.MasterPassword != MasterPasswordBox.Password)
-            {
-                _settings.MasterPassword = MasterPasswordBox.Password;
                 _updateSettings?.Invoke(_settings);
             }
         }

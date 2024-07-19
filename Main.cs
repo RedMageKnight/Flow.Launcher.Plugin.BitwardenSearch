@@ -31,6 +31,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private BitwardenFlowSettings _settings = null!;
         private bool _isLocked = false;
         private Timer? _autoLockTimer;
+        private bool _needsInitialSetup = false;
 
         public Main()
         {
@@ -83,13 +84,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             // Initialize logger
             Logger.Initialize(pluginDirectory, _settings);
             Logger.Log("Plugin initialization started", LogLevel.Info);
-
-            // Add new action keywords programmatically
-            string pluginId = context.CurrentPluginMetadata.ID;
-            context.API.AddActionKeyword(pluginId, "bwlock");
-            context.API.AddActionKeyword(pluginId, "bwunlock");
-
-            Logger.Log($"Added action keywords: bwlock, bwunlock for plugin ID: {pluginId}", LogLevel.Info);
 
             // Start the initialization process
             _ = Task.Run(async () =>
@@ -181,7 +175,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             if (string.IsNullOrEmpty(_settings.ClientId) || string.IsNullOrEmpty(_settings.ClientSecret))
             {
-                Logger.Log("Client ID or Client Secret not set. Skipping Bitwarden setup.", LogLevel.Error);
+                Logger.Log("Client ID or Client Secret not set. Initial setup required.", LogLevel.Info);
+                _needsInitialSetup = true;
                 return;
             }
 
@@ -195,7 +190,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 Logger.Log("Bitwarden CLI found");
 
-                // Always attempt to login and unlock
                 await LoginAndUnlock();
                 
                 _isInitialized = true;
@@ -239,58 +233,40 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             try
             {
                 Logger.Log("Starting login and unlock process", LogLevel.Info);
-                Logger.Log("Setting environment variables for Bitwarden CLI", LogLevel.Debug);
 
-                Logger.Log("Attempting to unlock Bitwarden vault", LogLevel.Info);
-                using var unlockProcess = new Process
+                if (!string.IsNullOrEmpty(_settings.SessionKey))
                 {
-                    StartInfo = new ProcessStartInfo
+                    Logger.Log("Existing session found, attempting to use it", LogLevel.Info);
+                    UpdateHttpClientAuthorization();
+                    if (await IsSessionValid())
                     {
-                        FileName = "bw",
-                        Arguments = "unlock --raw",
-                        UseShellExecute = false,
-                        RedirectStandardInput = true,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
+                        Logger.Log("Existing session is valid", LogLevel.Info);
+                        _isLocked = false;
+                        return;
                     }
-                };
-                unlockProcess.Start();
-
-                if (string.IsNullOrEmpty(_settings.MasterPassword))
-                {
-                    Logger.Log("Master password not set. Please set it in the plugin settings.", LogLevel.Error);
-                    throw new Exception("Master password not set");
+                    Logger.Log("Existing session is invalid, need to re-authenticate", LogLevel.Info);
                 }
 
-                await unlockProcess.StandardInput.WriteLineAsync(_settings.MasterPassword);
-                await unlockProcess.StandardInput.FlushAsync();
-
-                Logger.Log("Login completed, attempting to unlock vault", LogLevel.Info);
-
-                var unlockTask = unlockProcess.WaitForExitAsync();
-                if (await Task.WhenAny(unlockTask, Task.Delay(TimeSpan.FromSeconds(30))) != unlockTask)
-                {
-                    throw new TimeoutException("Unlock process timed out after 30 seconds");
-                }
-                string sessionKey = await unlockProcess.StandardOutput.ReadToEndAsync();
-
-                if (string.IsNullOrWhiteSpace(sessionKey))
-                {
-                    throw new Exception("Failed to obtain session key");
-                }
-
-                _settings.SessionKey = sessionKey.Trim();
-                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-                UpdateHttpClientAuthorization();
-                Logger.Log("Bitwarden vault unlocked successfully", LogLevel.Info);
-
-                await StartBitwardenServer();
+                Logger.Log("No valid session found, vault is locked", LogLevel.Info);
+                _isLocked = true;
             }
             catch (Exception ex)
             {
-                Logger.LogError("Failed to login or unlock Bitwarden", ex);
-                throw;
+                Logger.LogError("Failed during login and unlock process", ex);
+                _isLocked = true;
+            }
+        }
+
+        private async Task<bool> IsSessionValid()
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/sync");
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -362,19 +338,34 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public async Task<List<Result>> QueryAsync(Query query, CancellationToken token)
         {
-            Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: {query.Search}", LogLevel.Debug);
+            if (_needsInitialSetup)
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Bitwarden plugin needs setup",
+                        SubTitle = "Click here to open settings and enter your Client ID and Client Secret",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.OpenSettingDialog();
+                            return true;
+                        }
+                    }
+                };
+            }
+            
+            if (query.Search.Contains("/unlock"))
+            {
+                Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: /unlock ******", LogLevel.Debug);
+            }
+            else 
+            {
+                Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: {query.Search}", LogLevel.Debug);
+            }
 
-            if (query.ActionKeyword.ToLower() == "bwlock")
-            {
-                Logger.Log("Executing LockVault", LogLevel.Debug);
-                return LockVault();
-            }
-            else if (query.ActionKeyword.ToLower() == "bwunlock")
-            {
-                Logger.Log("Executing UnlockVault", LogLevel.Debug);
-                return await UnlockVault(query.Search);
-            }
-            else if (query.ActionKeyword.ToLower() == "bw")
+            if (query.ActionKeyword.ToLower() == "bw")
             {
                 Logger.Log("Executing HandleBitwardenSearch", LogLevel.Debug);
                 return await HandleBitwardenSearch(query, token);
@@ -628,7 +619,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             try
             {
-                // Use the entered master password to unlock the vault
+                Logger.Log("Attempting to unlock vault", LogLevel.Debug);
+                
                 var unlockProcess = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -651,6 +643,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 if (string.IsNullOrWhiteSpace(sessionKey))
                 {
+                    Logger.Log("Failed to obtain session key", LogLevel.Error);
                     return new List<Result>
                     {
                         new Result
@@ -666,10 +659,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
                 UpdateHttpClientAuthorization();
                 _isLocked = false;
+                _needsInitialSetup = false;
 
-                // Set up the auto-lock timer here
                 SetupAutoLockTimer();
 
+                Logger.Log("Vault unlocked successfully", LogLevel.Info);
                 return new List<Result>
                 {
                     new Result

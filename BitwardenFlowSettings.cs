@@ -1,4 +1,6 @@
+using System;
 using System.ComponentModel;
+using System.Security;
 using Flow.Launcher.Plugin;
 using Newtonsoft.Json;
 
@@ -11,9 +13,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         [JsonProperty("clientSecret")]
         public string ClientSecret { get; set; } = string.Empty;
-
-        [JsonProperty("masterPassword")]
-        public string MasterPassword { get; set; } = string.Empty;
 
         [JsonProperty("sessionKey")]
         public string SessionKey { get; set; } = string.Empty;
@@ -41,7 +40,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             // Set default values
             ClientId = string.Empty;
             ClientSecret = string.Empty;
-            MasterPassword = string.Empty;
             SessionKey = string.Empty;
             LogDebug = false;
             LogInfo = false;

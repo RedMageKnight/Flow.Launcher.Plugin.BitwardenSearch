@@ -24,9 +24,6 @@
             
             <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" PasswordChanged="ClientSecretBox_PasswordChanged"/>
-
-            <TextBlock Grid.Row="4" Grid.Column="0" Text="Master Password:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <PasswordBox Grid.Row="4" Grid.Column="1" x:Name="MasterPasswordBox" PasswordChanged="MasterPasswordBox_PasswordChanged"/>
         </Grid>
         
         <TextBlock Margin="0,20,0,10" TextWrapping="Wrap">
