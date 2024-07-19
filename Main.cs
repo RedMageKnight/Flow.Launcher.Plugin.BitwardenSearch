@@ -30,6 +30,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private PluginInitContext _context = null!;
         private BitwardenFlowSettings _settings = null!;
         private bool _isLocked = false;
+        private Timer? _autoLockTimer;
 
         public Main()
         {
@@ -127,6 +128,29 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     Logger.LogError("Error during background initialization", ex);
                 }
             });
+            SetupAutoLockTimer();
+        }
+
+        private void SetupAutoLockTimer()
+        {
+            if (_autoLockTimer != null)
+            {
+                _autoLockTimer.Dispose();
+            }
+
+            if (!_settings.KeepUnlocked && _settings.LockTime > 0)
+            {
+                _autoLockTimer = new Timer(AutoLockVault, null, TimeSpan.FromMinutes(_settings.LockTime), Timeout.InfiniteTimeSpan);
+            }
+        }
+
+        private void AutoLockVault(object? state)
+        {
+            if (!_isLocked)
+            {
+                LockVault();
+                Logger.Log("Vault auto-locked due to inactivity", LogLevel.Info);
+            }
         }
 
         private async Task EnsureInitialized()
@@ -570,6 +594,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
             UpdateHttpClientAuthorization();
 
+            if (_autoLockTimer != null)
+            {
+                _autoLockTimer.Dispose();
+                _autoLockTimer = null;
+            }
+
             return new List<Result>
             {
                 new Result
@@ -636,6 +666,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
                 UpdateHttpClientAuthorization();
                 _isLocked = false;
+
+                // Set up the auto-lock timer here
+                SetupAutoLockTimer();
 
                 return new List<Result>
                 {
@@ -867,13 +900,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return new BitwardenFlowSettingPanel(_settings, UpdateSettings);
         }
 
-        private async void UpdateSettings(BitwardenFlowSettings newSettings)
+        private void UpdateSettings(BitwardenFlowSettings newSettings)
         {
             _settings = newSettings;
             _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
             Logger.Log("Settings updated");
-            _isInitialized = false; // Force re-initialization with new settings
-            await EnsureInitialized();
+            SetupAutoLockTimer();
         }
 
         public void Dispose()
@@ -883,6 +915,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _serveProcess?.Dispose();
             _initializationLock.Dispose();
             Logger.Log("Plugin disposed", LogLevel.Debug);
+            _autoLockTimer?.Dispose();
         }
 
         private static readonly object _faviconLock = new object();

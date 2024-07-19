@@ -4,11 +4,15 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" 
-             d:DesignHeight="450" d:DesignWidth="800">
+             d:DesignHeight="550" d:DesignWidth="800">
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="10"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="20"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="10"/>
             <RowDefinition Height="Auto"/>
@@ -41,6 +45,13 @@
             <CheckBox x:Name="LogInfoCheckBox" Content="Info" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
             <CheckBox x:Name="LogWarningCheckBox" Content="Warning" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
             <CheckBox x:Name="LogErrorCheckBox" Content="Error" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+        </StackPanel>
+
+        <TextBlock Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="2" Text="Auto-Lock Settings:" FontWeight="Bold" Margin="0,0,0,5"/>
+        <CheckBox Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="2" x:Name="KeepUnlockedCheckBox" Content="Keep Vault Unlocked Indefinitely" Checked="KeepUnlockedCheckBox_Changed" Unchecked="KeepUnlockedCheckBox_Changed"/>
+        <StackPanel Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,5,0,0">
+            <TextBlock Text="Auto-lock after (minutes): " VerticalAlignment="Center"/>
+            <TextBox x:Name="LockTimeTextBox" Width="50" PreviewTextInput="LockTimeTextBox_PreviewTextInput" TextChanged="LockTimeTextBox_TextChanged"/>
         </StackPanel>
     </Grid>
 </UserControl>

@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -28,6 +29,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             LogInfoCheckBox.IsChecked = _settings.LogInfo;
             LogWarningCheckBox.IsChecked = _settings.LogWarning;
             LogErrorCheckBox.IsChecked = _settings.LogError;
+
+            KeepUnlockedCheckBox.IsChecked = _settings.KeepUnlocked;
+            LockTimeTextBox.Text = _settings.LockTime.ToString();
+            LockTimeTextBox.IsEnabled = !_settings.KeepUnlocked;
         }
 
         private void ClientIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -78,6 +83,30 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 _updateSettings?.Invoke(_settings);
             }
+        }
+
+        private void KeepUnlockedCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings != null)
+            {
+                _settings.KeepUnlocked = KeepUnlockedCheckBox.IsChecked ?? false;
+                LockTimeTextBox.IsEnabled = !_settings.KeepUnlocked;
+                _updateSettings?.Invoke(_settings);
+            }
+        }
+
+        private void LockTimeTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_settings != null && int.TryParse(LockTimeTextBox.Text, out int lockTime))
+            {
+                _settings.LockTime = lockTime;
+                _updateSettings?.Invoke(_settings);
+            }
+        }
+
+        private void LockTimeTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
+        {
+            e.Handled = !int.TryParse(e.Text, out _);
         }
     }
 }

@@ -30,6 +30,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("logError")]
         public bool LogError { get; set; } = true;
 
+        [JsonProperty("keepUnlocked")]
+        public bool KeepUnlocked { get; set; } = false;
+
+        [JsonProperty("lockTime")]
+        public int LockTime { get; set; } = 5; // Default to 5 minutes
+
         public BitwardenFlowSettings()
         {
             // Set default values
@@ -41,6 +47,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             LogInfo = false;
             LogWarning = true;
             LogError = true;
+            KeepUnlocked = false;
+            LockTime = 5;
         }
 
         public string GetTranslatedPluginTitle()
