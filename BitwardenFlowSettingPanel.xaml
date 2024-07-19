@@ -4,54 +4,50 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" 
-             d:DesignHeight="550" d:DesignWidth="800">
-    <Grid Margin="20">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="10"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="10"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="20"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="10"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="20"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="10"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
-        <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="Auto"/>
-            <ColumnDefinition Width="*"/>
-        </Grid.ColumnDefinitions>
-        
-        <TextBlock Grid.Row="0" Grid.Column="0" Text="Client ID:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-        <TextBox Grid.Row="0" Grid.Column="1" x:Name="ClientIdTextBox" TextChanged="ClientIdTextBox_TextChanged"/>
-        
-        <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-        <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" PasswordChanged="ClientSecretBox_PasswordChanged"/>
+             d:DesignHeight="600" d:DesignWidth="800">
+    <StackPanel Margin="20">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="10"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="10"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            
+            <TextBlock Grid.Row="0" Grid.Column="0" Text="Client ID:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <TextBox Grid.Row="0" Grid.Column="1" x:Name="ClientIdTextBox" TextChanged="ClientIdTextBox_TextChanged"/>
+            
+            <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" PasswordChanged="ClientSecretBox_PasswordChanged"/>
 
-        <TextBlock Grid.Row="4" Grid.Column="0" Text="Master Password:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-        <PasswordBox Grid.Row="4" Grid.Column="1" x:Name="MasterPasswordBox" PasswordChanged="MasterPasswordBox_PasswordChanged"/>
+            <TextBlock Grid.Row="4" Grid.Column="0" Text="Master Password:" VerticalAlignment="Center" Margin="0,0,10,0"/>
+            <PasswordBox Grid.Row="4" Grid.Column="1" x:Name="MasterPasswordBox" PasswordChanged="MasterPasswordBox_PasswordChanged"/>
+        </Grid>
         
-        <TextBlock Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" TextWrapping="Wrap">
+        <TextBlock Margin="0,20,0,10" TextWrapping="Wrap">
             Enter your Bitwarden API client_id and client_secret in the fields above. This can be attained by navigating to Bitwarden --> Account Settings --> Security --> Keys --> View API key. The master password is your Bitwarden vault password.
         </TextBlock>
 
-        <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Vertical">
-            <TextBlock Text="Log Levels:" FontWeight="Bold" Margin="0,0,0,5"/>
-            <CheckBox x:Name="LogDebugCheckBox" Content="Debug" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
-            <CheckBox x:Name="LogInfoCheckBox" Content="Info" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
-            <CheckBox x:Name="LogWarningCheckBox" Content="Warning" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
-            <CheckBox x:Name="LogErrorCheckBox" Content="Error" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+        <TextBlock Text="Log Levels:" FontWeight="Bold" Margin="0,20,0,5"/>
+        <StackPanel Margin="10,0,0,0">
+            <CheckBox x:Name="LogDebugCheckBox" Content="Debug" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogInfoCheckBox" Content="Info" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogWarningCheckBox" Content="Warning" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
+            <CheckBox x:Name="LogErrorCheckBox" Content="Error" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
         </StackPanel>
 
-        <TextBlock Grid.Row="10" Grid.Column="0" Grid.ColumnSpan="2" Text="Auto-Lock Settings:" FontWeight="Bold" Margin="0,0,0,5"/>
-        <CheckBox Grid.Row="11" Grid.Column="0" Grid.ColumnSpan="2" x:Name="KeepUnlockedCheckBox" Content="Keep Vault Unlocked Indefinitely" Checked="KeepUnlockedCheckBox_Changed" Unchecked="KeepUnlockedCheckBox_Changed"/>
-        <StackPanel Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,5,0,0">
+        <TextBlock Text="Auto-Lock Settings:" FontWeight="Bold" Margin="0,20,0,5"/>
+        <CheckBox x:Name="KeepUnlockedCheckBox" Content="Keep Vault Unlocked Indefinitely" Margin="10,5,0,0" 
+                  Checked="KeepUnlockedCheckBox_Changed" Unchecked="KeepUnlockedCheckBox_Changed"/>
+        <StackPanel Orientation="Horizontal" Margin="10,10,0,0">
             <TextBlock Text="Auto-lock after (minutes): " VerticalAlignment="Center"/>
-            <TextBox x:Name="LockTimeTextBox" Width="50" PreviewTextInput="LockTimeTextBox_PreviewTextInput" TextChanged="LockTimeTextBox_TextChanged"/>
+            <TextBox x:Name="LockTimeTextBox" Width="50" PreviewTextInput="LockTimeTextBox_PreviewTextInput" 
+                     TextChanged="LockTimeTextBox_TextChanged" VerticalAlignment="Center"/>
         </StackPanel>
-    </Grid>
+    </StackPanel>
 </UserControl>
