@@ -4,7 +4,7 @@
     <AssemblyName>Flow.Launcher.Plugin.BitwardenSearch</AssemblyName>
     <PackageId>Flow.Launcher.Plugin.BitwardenSearch</PackageId>
     <RootNamespace>Flow.Launcher.Plugin.BitwardenSearch</RootNamespace>
-    <Authors>YourName</Authors>
+    <Authors>RedMageKnight</Authors>
     <PackageProjectUrl>https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch</PackageProjectUrl>
     <RepositoryUrl>https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch</RepositoryUrl>
     <PackageTags>flow-launcher flow-plugin</PackageTags>
@@ -45,15 +45,11 @@
   <ItemGroup>
     <Page Include="BitwardenFlowSettingPanel.xaml" />
     <Page Include="UriListWindow.xaml" />
-    <Page Include="PasswordInputWindow.xaml" />
     <Compile Update="BitwardenFlowSettingPanel.xaml.cs">
       <DependentUpon>BitwardenFlowSettingPanel.xaml</DependentUpon>
     </Compile>
     <Compile Update="UriListWindow.xaml.cs">
       <DependentUpon>UriListWindow.xaml</DependentUpon>
-    </Compile>
-    <Compile Update="PasswordInputWindow.xaml.cs">
-      <DependentUpon>PasswordInputWindow.xaml</DependentUpon>
     </Compile>
   </ItemGroup>
 

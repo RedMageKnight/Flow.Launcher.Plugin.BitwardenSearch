@@ -11,11 +11,28 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("clientId")]
         public string ClientId { get; set; } = string.Empty;
 
+        [JsonIgnore]
+        public SecureString ClientSecret { get; set; } = new SecureString();
+
         [JsonProperty("clientSecret")]
-        public string ClientSecret { get; set; } = string.Empty;
+        public string ClientSecretJson
+        {
+            get => SecurePasswordHandler.ConvertToUnsecureString(ClientSecret);
+            set
+            {
+                if (ClientSecret != null)
+                {
+                    ClientSecret.Dispose();
+                }
+                ClientSecret = SecurePasswordHandler.ConvertToSecureString(value);
+            }
+        }
 
         [JsonProperty("sessionKey")]
         public string SessionKey { get; set; } = string.Empty;
+
+        [JsonProperty("logTrace")]
+        public bool LogTrace { get; set; } = false;
 
         [JsonProperty("logDebug")]
         public bool LogDebug { get; set; } = false;
@@ -33,21 +50,19 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public bool KeepUnlocked { get; set; } = false;
 
         [JsonProperty("lockTime")]
-        public int LockTime { get; set; } = 5; // Default to 5 minutes
+        public int LockTime { get; set; } = 5; 
+        
+        [JsonProperty("notifyOnPasswordCopy")]
+        public bool NotifyOnPasswordCopy { get; set; } = false;
 
-        public BitwardenFlowSettings()
-        {
-            // Set default values
-            ClientId = string.Empty;
-            ClientSecret = string.Empty;
-            SessionKey = string.Empty;
-            LogDebug = false;
-            LogInfo = false;
-            LogWarning = true;
-            LogError = true;
-            KeepUnlocked = false;
-            LockTime = 5;
-        }
+        [JsonProperty("notifyOnUsernameCopy")]
+        public bool NotifyOnUsernameCopy { get; set; } = false;
+
+        [JsonProperty("notifyOnUriCopy")]
+        public bool NotifyOnUriCopy { get; set; } = false;
+
+        [JsonProperty("notifyOnTotpCopy")]
+        public bool NotifyOnTotpCopy { get; set; } = true;
 
         public string GetTranslatedPluginTitle()
         {

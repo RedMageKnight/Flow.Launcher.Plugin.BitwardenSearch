@@ -4,7 +4,7 @@
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" 
-             d:DesignHeight="600" d:DesignWidth="800">
+             d:DesignHeight="700" d:DesignWidth="800">
     <StackPanel Margin="20">
         <Grid>
             <Grid.RowDefinitions>
@@ -32,6 +32,7 @@
 
         <TextBlock Text="Log Levels:" FontWeight="Bold" Margin="0,20,0,5"/>
         <StackPanel Margin="10,0,0,0">
+            <CheckBox x:Name="LogTraceCheckBox" Content="Trace" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
             <CheckBox x:Name="LogDebugCheckBox" Content="Debug" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
             <CheckBox x:Name="LogInfoCheckBox" Content="Info" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
             <CheckBox x:Name="LogWarningCheckBox" Content="Warning" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
@@ -45,6 +46,14 @@
             <TextBlock Text="Auto-lock after (minutes): " VerticalAlignment="Center"/>
             <TextBox x:Name="LockTimeTextBox" Width="50" PreviewTextInput="LockTimeTextBox_PreviewTextInput" 
                      TextChanged="LockTimeTextBox_TextChanged" VerticalAlignment="Center"/>
+        </StackPanel>
+
+        <TextBlock Text="Notification Settings:" FontWeight="Bold" Margin="0,20,0,5"/>
+        <StackPanel Margin="10,0,0,0">
+            <CheckBox x:Name="NotifyPasswordCopyCheckBox" Content="Notify on password copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
+            <CheckBox x:Name="NotifyUsernameCopyCheckBox" Content="Notify on username copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
+            <CheckBox x:Name="NotifyUriCopyCheckBox" Content="Notify on URI copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
+            <CheckBox x:Name="NotifyTotpCopyCheckBox" Content="Notify on TOTP code copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
         </StackPanel>
     </StackPanel>
 </UserControl>

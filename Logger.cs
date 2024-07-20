@@ -48,12 +48,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             #endif
         }
 
+        public static void Trace(string message)
+        {
+            Log(message, LogLevel.Trace);
+        }
+
         private static bool ShouldLog(LogLevel level)
         {
             if (_settings == null) return true; // Log everything if settings are not initialized
 
             return level switch
             {
+                LogLevel.Trace => _settings.LogTrace,
                 LogLevel.Debug => _settings.LogDebug,
                 LogLevel.Info => _settings.LogInfo,
                 LogLevel.Warning => _settings.LogWarning,
@@ -65,6 +71,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
     public enum LogLevel
     {
+        Trace,
         Debug,
         Info,
         Warning,

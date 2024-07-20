@@ -8,19 +8,19 @@ As of this release, it contains the following capabilities:<br><br>
 
 1) Fuzzy search across your vault via the bw command with icon population of individual vault items based on the URIs you have saved in your individual vault items.
 2) Icon caching for faster population of visuals.
-3) The ability to copy usernames, passwords, and URI's for each vault item with an expander for URI items in case you have multiple listed that you can select from.
+3) The ability to copy usernames, passwords, TOTPs, and URI's for each vault item with an expander for URI items in case you have multiple listed that you can select from.
 4) An adjustable log that defaults to showing only Warning and Error messages, but can be expanded to show additional logging from the Flow Launcher settings menu.
+5) Adjustable notification settings for copy settings.
+6) Adjustable vault auto-lock timeouts ranging from letting you keep your vault unlocked, or setting it to lock automatically after however many minutes.
 
 <h2>Requirements</h2>
 In order to use this plugin, you must have the <a href="https://bitwarden.com/help/cli/">Bitwarden CLI installed</a>.
 
 <h2>Installation Instructions</h2>
-I'm aware of the documentation on how to add a plugin to the Flow Launcher plugin store, but I'm nervous to publish since it's my first plugin and want to make sure there isn't anything generally wrong with the plugin before doing so (like if there's any security concerns and whatnot with my code), so for now, here's some simple instructions on how to get it working
-with your current Flow Launcher installation:<br><br>
-
-1) Make sure you've installed the Bitwarden CLI as indicated in the Requirements section above.
-2) Download the latest release.zip file in the release section here.
-3) Extract the contents to your Flow Launcher Plugins directory (installation location may vary depending on how you installed Flow Launcher. The easiest way to figure this out is to go to your Flow Launcher Plugin Settings page, pick an existing plugin, and navigate to its folder. Going up one folder from that is where it's reading your plugins.)
+Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br>
+```
+pm install bitwarden
+```
 
 <h2>How to Use:</h2>
 <ul>
@@ -31,12 +31,13 @@ with your current Flow Launcher installation:<br><br>
     <ul>
       <li>Instructions for the API stuff can be found in the plugin settings menu.</li>
     </ul>
-    <li>Your Bitwarden master password.</li>
   </ul>
   <li>Type <code>bw</code> before your search-term to start populating items in your vault.
+  <li>Adding sub-command <code>/lock</code> or <code>/unlock</code> after <code>bw</code> (make sure to include a space between them) will allow you to manually lock and unlock the vault respectively. 
   <li>Just pressing <code>ENTER</code> on the populated item will copy the password.</li>
   <li>Pressing <code>CTRL</code>+<code>ENTER</code> copies the username.</li>
   <li>Pressing <code>CTRL</code>+<code>SHIFT</code>+<code>ENTER</code> brings up the URI menu where you can use the <code>UP</code> and <code>DOWN</code> arrow keys to select your preferred URI and press <code>ENTER</code> to copy it to your clipboard.</li>
+  <li>TOTP results will appear as a separate entry if they exist for your vault item, so you just have to click on the TOTP entry or press <code>ENTER</code> or use the respective <code>ALT</code> + whatnever number is associated with the result.
 </ul>
 
 <h2>Screenshots</h2>
@@ -47,6 +48,10 @@ with your current Flow Launcher installation:<br><br>
 <div align="center">
     <img src="/screenshots/Flow.Launcher_I4Vy1Xpcrz.png" width="400px"</img> 
     <p>Some search results.</p>
+</div>
+<div align="center">
+    <img src="/screenshots/Flow.Launcher_VhOPuemKFn.png" width="400px"</img> 
+    <p>Some search results with TOTP.</p>
 </div>
 <div align="center">
     <img src="/screenshots/Flow.Launcher_RtNvIxkhtk.png" width="400px"</img> 

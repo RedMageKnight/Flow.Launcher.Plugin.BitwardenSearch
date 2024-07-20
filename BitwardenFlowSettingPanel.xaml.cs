@@ -22,8 +22,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _updateSettings = updateSettings;
             
             ClientIdTextBox.Text = _settings.ClientId;
-            ClientSecretBox.Password = _settings.ClientSecret;
+            ClientSecretBox.Password = SecurePasswordHandler.ConvertToUnsecureString(_settings.ClientSecret);
             
+            LogTraceCheckBox.IsChecked = _settings.LogTrace;
             LogDebugCheckBox.IsChecked = _settings.LogDebug;
             LogInfoCheckBox.IsChecked = _settings.LogInfo;
             LogWarningCheckBox.IsChecked = _settings.LogWarning;
@@ -32,6 +33,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             KeepUnlockedCheckBox.IsChecked = _settings.KeepUnlocked;
             LockTimeTextBox.Text = _settings.LockTime.ToString();
             LockTimeTextBox.IsEnabled = !_settings.KeepUnlocked;
+
+            NotifyPasswordCopyCheckBox.IsChecked = _settings.NotifyOnPasswordCopy;
+            NotifyUsernameCopyCheckBox.IsChecked = _settings.NotifyOnUsernameCopy;
+            NotifyUriCopyCheckBox.IsChecked = _settings.NotifyOnUriCopy;
+            NotifyTotpCopyCheckBox.IsChecked = _settings.NotifyOnTotpCopy;
         }
 
         private void ClientIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -45,9 +51,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private void ClientSecretBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
-            if (_settings != null && _settings.ClientSecret != ClientSecretBox.Password)
+            if (_settings != null)
             {
-                _settings.ClientSecret = ClientSecretBox.Password;
+                _settings.ClientSecret = SecurePasswordHandler.ConvertToSecureString(ClientSecretBox.Password);
                 _updateSettings?.Invoke(_settings);
             }
         }
@@ -58,6 +64,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 switch (checkBox.Content.ToString())
                 {
+                    case "Trace":
+                        _settings.LogTrace = checkBox.IsChecked ?? false;
+                        break;
                     case "Debug":
                         _settings.LogDebug = checkBox.IsChecked ?? false;
                         break;
@@ -97,6 +106,29 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private void LockTimeTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
         {
             e.Handled = !int.TryParse(e.Text, out _);
+        }
+
+        private void NotificationCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings != null && sender is CheckBox checkBox)
+            {
+                switch (checkBox.Name)
+                {
+                    case "NotifyPasswordCopyCheckBox":
+                        _settings.NotifyOnPasswordCopy = checkBox.IsChecked ?? false;
+                        break;
+                    case "NotifyUsernameCopyCheckBox":
+                        _settings.NotifyOnUsernameCopy = checkBox.IsChecked ?? false;
+                        break;
+                    case "NotifyUriCopyCheckBox":
+                        _settings.NotifyOnUriCopy = checkBox.IsChecked ?? false;
+                        break;
+                    case "NotifyTotpCopyCheckBox":
+                        _settings.NotifyOnTotpCopy = checkBox.IsChecked ?? false;
+                        break;
+                }
+                _updateSettings?.Invoke(_settings);
+            }
         }
     }
 }
