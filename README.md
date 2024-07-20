@@ -14,7 +14,7 @@ As of this release, it contains the following capabilities:<br><br>
 6) Adjustable vault auto-lock timeouts ranging from letting you keep your vault unlocked, or setting it to lock automatically after however many minutes.
 
 <h2>Requirements</h2>
-In order to use this plugin, you must have the <a href="https://bitwarden.com/help/cli/">Bitwarden CLI installed</a>.
+In order to use this plugin, you must have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI installed</a>.
 
 <h2>Installation Instructions</h2>
 Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br><br>
