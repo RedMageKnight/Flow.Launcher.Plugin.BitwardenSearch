@@ -25,9 +25,9 @@ jobs:
         path: 'plugin.json'
         prop_path: 'Version'  
     - name: Restore dependencies
-      run: dotnet restore
+      run: dotnet Flow.Launcher.Plugin.Bitwarden.csproj restore
     - name: Build
-      run: dotnet build --no-restore
+      run: dotnet build Flow.Launcher.Plugin.Bitwarden.csproj --no-restore
     - name: Publish
       uses: softprops/action-gh-release@v1
       with:
