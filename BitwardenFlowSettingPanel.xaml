@@ -27,7 +27,7 @@
         </Grid>
         
         <TextBlock Margin="0,20,0,10" TextWrapping="Wrap">
-            Enter your Bitwarden API client_id and client_secret in the fields above. This can be attained by navigating to Bitwarden --> Account Settings --> Security --> Keys --> View API key. The master password is your Bitwarden vault password.
+            Enter your Bitwarden API client_id and client_secret in the fields above. This can be attained by navigating to Bitwarden --> Account Settings --> Security --> Keys --> View API key.
         </TextBlock>
 
         <TextBlock Text="Log Levels:" FontWeight="Bold" Margin="0,20,0,5"/>
