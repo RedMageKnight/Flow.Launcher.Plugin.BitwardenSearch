@@ -24,10 +24,18 @@ jobs:
       with: 
         path: 'plugin.json'
         prop_path: 'Version'  
-    - name: Publish package
-      run: dotnet publish Flow.Launcher.Plugin.Bitwarden.csproj -c Release -r win-x64 --no-self-contained -o publish/
-    - uses: actions/upload-artifact@v4
+    - run: echo ${{steps.version.outputs.prop}}
+    - name: Restore
+      run: |
+        dotnet restore
+    - name: Build
+      run: |
+        dotnet publish -c Release -r win-x64 --no-self-contained Flow.Launcher.Plugin.Bitwarden.csproj
+        7z a -tzip "Flow.Launcher.Plugin.Bitwarden.zip" "./bin/Release/win-x64/publish/*"
+    - name: Publish
+      uses: softprops/action-gh-release@v2
       with:
-          name: Bitwarden
-          path: publish/
-          if-no-files-found: error
+        files: "Flow.Launcher.Plugin.Bitwarden.zip"
+        tag_name: "v${{steps.version.outputs.prop}}"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
