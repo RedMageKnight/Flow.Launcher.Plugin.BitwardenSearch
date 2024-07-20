@@ -27,9 +27,9 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore 'Flow.Launcher.Plugin.Bitwarden.csproj'
     - name: Build
-      run: dotnet publish 'Flow.Launcher.Plugin.Bitwarden.csproj' -c Release -o "Bitwarden-${{steps.version.outputs.prop}}"
-          7z a -tzip "Bitwarden-${{steps.version.outputs.prop}}.zip" "./Bitwarden-${{steps.version.outputs.prop}}/*"
-          rm -r "Bitwarden-${{steps.version.outputs.prop}}"
+      run: dotnet publish 'Flow.Launcher.Plugin.Bitwarden.csproj' -c Release -o "Bitwarden"
+        7z a -tzip "Flow.Launcher.Plugin.Bitwarden.zip" "Bitwarden/*"
+        rm -r "Bitwarden"
     - name: Publish
       uses: softprops/action-gh-release@v1
       with:
