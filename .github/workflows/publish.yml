@@ -25,7 +25,7 @@ jobs:
         path: 'plugin.json'
         prop_path: 'Version'  
     - name: Publish package
-      run: dotnet publish -c Release -r win-x64 --no-self-contained -o publish/
+      run: dotnet publish Flow.Launcher.Plugin.Bitwarden.csproj -c Release -r win-x64 --no-self-contained -o publish/
     - uses: actions/upload-artifact@v4
       with:
           name: Bitwarden
