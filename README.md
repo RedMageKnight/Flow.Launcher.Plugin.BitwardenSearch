@@ -17,10 +17,9 @@ As of this release, it contains the following capabilities:<br><br>
 In order to use this plugin, you must have the <a href="https://bitwarden.com/help/cli/">Bitwarden CLI installed</a>.
 
 <h2>Installation Instructions</h2>
-Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br>
-```
-pm install bitwarden
-```
+Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br><br>
+
+<code>pm install bitwarden</code>
 
 <h2>How to Use:</h2>
 <ul>
