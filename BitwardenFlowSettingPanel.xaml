@@ -5,6 +5,15 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
              mc:Ignorable="d" 
              d:DesignHeight="700" d:DesignWidth="800">
+    <UserControl.Resources>
+        <Style x:Key="SaveButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#007bff"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+    </UserControl.Resources>
+    
     <StackPanel Margin="20">
         <Grid>
             <Grid.RowDefinitions>
@@ -17,13 +26,17 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             
             <TextBlock Grid.Row="0" Grid.Column="0" Text="Client ID:" VerticalAlignment="Center" Margin="0,0,10,0"/>
-            <TextBox Grid.Row="0" Grid.Column="1" x:Name="ClientIdTextBox" TextChanged="ClientIdTextBox_TextChanged"/>
+            <TextBox Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" x:Name="ClientIdTextBox" TextChanged="ClientIdTextBox_TextChanged"/>
             
             <TextBlock Grid.Row="2" Grid.Column="0" Text="Client Secret:" VerticalAlignment="Center" Margin="0,0,10,0"/>
             <PasswordBox Grid.Row="2" Grid.Column="1" x:Name="ClientSecretBox" PasswordChanged="ClientSecretBox_PasswordChanged"/>
+            <Button Grid.Row="2" Grid.Column="2" x:Name="SaveClientSecretButton" 
+                    Content="Save Secret" Click="SaveClientSecretButton_Click" 
+                    Margin="10,0,0,0" Style="{StaticResource SaveButtonStyle}"/>
         </Grid>
         
         <TextBlock Margin="0,20,0,10" TextWrapping="Wrap">

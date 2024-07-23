@@ -15,6 +15,7 @@ As of this release, it contains the following capabilities:<br><br>
 
 <h2>Requirements</h2>
 In order to use this plugin, you must have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI installed</a>.
+<li>The key to getting this working is, however you install it, you should have the directory path your <code>bw.exe</code> is in within your PATH environment variable.</li>
 
 <h2>Installation Instructions</h2>
 Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br><br>

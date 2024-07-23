@@ -4,7 +4,7 @@
   "Name": "Bitwarden",
   "Description": "Quick access to your Bitwarden vault via Flow Launcher.",
   "Author": "RedMageKnight",
-  "Version": "1.1.0",
+  "Version": "1.2.0",
   "Language": "csharp",
   "Website": "https://github.com/RedMageKnight/Flow.Launcher.Plugin.BitwardenSearch",
   "ExecuteFileName": "Flow.Launcher.Plugin.BitwardenSearch.dll",

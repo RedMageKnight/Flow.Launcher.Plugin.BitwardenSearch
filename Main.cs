@@ -14,6 +14,7 @@ using System.IO;
 using Newtonsoft.Json;
 using System.Security;
 using System.Runtime.InteropServices;
+using System.Net.Sockets;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -177,6 +178,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task EnsureBitwardenSetup()
         {
+            if (!IsBitwardenCliInstalled())
+            {
+                Logger.Log("Bitwarden CLI not installed. Setup cannot proceed.", LogLevel.Error);
+                return;
+            }
+
             if (string.IsNullOrEmpty(_settings.ClientId) || _clientSecret == null || _clientSecret.Length == 0)
             {
                 Logger.Log("Client ID or Client Secret not set. Initial setup required.", LogLevel.Info);
@@ -206,7 +213,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private bool IsBitwardenCliInstalled()
+        public bool IsBitwardenCliInstalled()
         {
             try
             {
@@ -224,12 +231,29 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 process.Start();
                 string output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit();
-                return !string.IsNullOrEmpty(output);
+                
+                if (!string.IsNullOrEmpty(output))
+                {
+                    Logger.Log($"Bitwarden CLI found. Version: {output.Trim()}", LogLevel.Info);
+                    return true;
+                }
+                else
+                {
+                    Logger.Log("Bitwarden CLI not found or returned empty output.", LogLevel.Warning);
+                    return false;
+                }
             }
-            catch
+            catch (Exception ex)
             {
+                Logger.Log($"Error checking for Bitwarden CLI: {ex.Message}", LogLevel.Error);
                 return false;
             }
+        }
+
+        private bool IsBitwardenCliRunning()
+        {
+            var processes = Process.GetProcessesByName("bw");
+            return processes.Length > 0;
         }
 
         private async Task LoginAndUnlock()
@@ -258,11 +282,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return;
                 }
 
-                // At this point, we have a client secret but no valid session.
-                // We should prompt the user to enter their master password to unlock the vault.
-                // This should be handled in the UI layer (e.g., in HandleBitwardenSearch),
-                // so we'll just set the locked state here.
-
                 Logger.Log("No valid session found, vault is locked", LogLevel.Info);
                 _isLocked = true;
             }
@@ -288,13 +307,63 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task StartBitwardenServer()
         {
+            if (!IsBitwardenCliInstalled())
+            {
+                Logger.Log("Bitwarden CLI not installed. Cannot start server.", LogLevel.Error);
+                throw new Exception("Bitwarden CLI not installed");
+            }
+
             if (_serveProcess != null && !_serveProcess.HasExited)
             {
-                Logger.Log("Bitwarden server already running");
+                Logger.Log("Bitwarden server already running", LogLevel.Debug);
                 return;
             }
 
-            Logger.Log("Starting Bitwarden server");
+            Logger.Log("Checking if Bitwarden CLI is already running", LogLevel.Debug);
+            if (IsBitwardenCliRunning())
+            {
+                Logger.Log("Bitwarden CLI is already running. Attempting to kill the process.", LogLevel.Warning);
+                foreach (var process in Process.GetProcessesByName("bw"))
+                {
+                    try
+                    {
+                        process.Kill();
+                        process.WaitForExit(5000);
+                        Logger.Log($"Killed Bitwarden CLI process with PID {process.Id}", LogLevel.Info);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError($"Failed to kill Bitwarden CLI process with PID {process.Id}", ex);
+                    }
+                }
+            }
+
+            Logger.Log("Checking if port 8087 is in use", LogLevel.Debug);
+            if (IsPortInUse(8087))
+            {
+                Logger.Log("Port 8087 is already in use. Attempting to connect to existing server.", LogLevel.Warning);
+                if (await IsExistingServerValid())
+                {
+                    Logger.Log("Connected to existing Bitwarden server.", LogLevel.Info);
+                    return;
+                }
+                else
+                {
+                    Logger.Log("Existing server is not valid. Attempting to kill the process.", LogLevel.Warning);
+                    KillProcessUsingPort(8087);
+                    
+                    // Wait a bit for the port to be released
+                    await Task.Delay(2000);
+                    
+                    if (IsPortInUse(8087))
+                    {
+                        Logger.Log("Failed to free up port 8087. Cannot start Bitwarden server.", LogLevel.Error);
+                        throw new Exception("Failed to free up port 8087 for Bitwarden server");
+                    }
+                }
+            }
+
+            Logger.Log("Starting Bitwarden server", LogLevel.Info);
             _serveProcess = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -311,30 +380,119 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _serveProcess.OutputDataReceived += (sender, e) => Logger.Log($"Bitwarden server output: {e.Data}", LogLevel.Debug);
             _serveProcess.ErrorDataReceived += (sender, e) => Logger.Log($"Bitwarden server error: {e.Data}", LogLevel.Error);
 
-            Logger.Log("Starting Bitwarden server process");
-            _serveProcess.Start();
-            _serveProcess.BeginOutputReadLine();
-            _serveProcess.BeginErrorReadLine();
-
-            Logger.Log("Waiting for Bitwarden server to initialize");
-            await Task.Delay(5000);
-
-            if (_serveProcess.HasExited)
-            {
-                throw new Exception("Bitwarden server process exited unexpectedly");
-            }
-
             try
             {
+                Logger.Log("Starting Bitwarden server process", LogLevel.Debug);
+                _serveProcess.Start();
+                _serveProcess.BeginOutputReadLine();
+                _serveProcess.BeginErrorReadLine();
+
+                Logger.Log("Waiting for Bitwarden server to initialize", LogLevel.Debug);
+                await Task.Delay(5000);
+
+                if (_serveProcess.HasExited)
+                {
+                    var exitCode = _serveProcess.ExitCode;
+                    Logger.Log($"Bitwarden server process exited unexpectedly with code: {exitCode}", LogLevel.Error);
+                    throw new Exception($"Bitwarden server process exited unexpectedly with code: {exitCode}");
+                }
+
                 using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(10);
                 var response = await client.GetAsync($"{ApiBaseUrl}/status");
                 response.EnsureSuccessStatusCode();
                 Logger.Log("Bitwarden server started successfully", LogLevel.Info);
             }
             catch (Exception ex)
             {
-                Logger.LogError("Failed to connect to Bitwarden server", ex);
+                Logger.LogError("Failed to start or connect to Bitwarden server", ex);
                 throw;
+            }
+        }
+
+        private bool IsPortInUse(int port)
+        {
+            bool inUse = false;
+            using (var tcpClient = new TcpClient())
+            {
+                try
+                {
+                    tcpClient.Connect("127.0.0.1", port);
+                    inUse = true;
+                }
+                catch (SocketException)
+                {
+                    // Port is not in use
+                }
+            }
+            return inUse;
+        }
+
+        private async Task<bool> IsExistingServerValid()
+        {
+            try
+            {
+                using var client = new HttpClient();
+                var response = await client.GetAsync($"{ApiBaseUrl}/status");
+                return response.IsSuccessStatusCode;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private void KillProcessUsingPort(int port)
+        {
+            try
+            {
+                var processInfo = new ProcessStartInfo("cmd", $"/c netstat -ano | findstr :{port}")
+                {
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                };
+
+                using (var process = Process.Start(processInfo))
+                {
+                    if (process == null)
+                    {
+                        Logger.Log($"Failed to start process to find PID for port {port}", LogLevel.Error);
+                        return;
+                    }
+
+                    string output = process.StandardOutput.ReadToEnd();
+                    process.WaitForExit();
+
+                    string[] lines = output.Split('\n');
+                    foreach (string line in lines)
+                    {
+                        string[] parts = line.Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length > 4)
+                        {
+                            string pidString = parts[4];
+                            if (int.TryParse(pidString, out int pid))
+                            {
+                                try
+                                {
+                                    Process.GetProcessById(pid).Kill();
+                                    Logger.Log($"Killed process with PID {pid} using port {port}", LogLevel.Info);
+                                    return;
+                                }
+                                catch (Exception ex)
+                                {
+                                    Logger.LogError($"Failed to kill process with PID {pid}", ex);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Logger.Log($"No process found using port {port}", LogLevel.Warning);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error occurred while trying to kill process using port {port}", ex);
             }
         }
 
@@ -354,6 +512,27 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public async Task<List<Result>> QueryAsync(Query query, CancellationToken token)
         {
+            if (!IsBitwardenCliInstalled())
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Bitwarden CLI not installed",
+                        SubTitle = "Click here to learn how to install the Bitwarden CLI",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "https://bitwarden.com/help/cli/#download-and-install",
+                                UseShellExecute = true
+                            });
+                            return true;
+                        }
+                    }
+                };
+            }
             if (_needsInitialSetup)
             {
                 return new List<Result>
@@ -1016,15 +1195,44 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public void Dispose()
         {
-            _httpClient.Dispose();
-            _serveProcess?.Kill();
-            _serveProcess?.Dispose();
-            _initializationLock.Dispose();
-            Logger.Log("Plugin disposed", LogLevel.Debug);
-            _autoLockTimer?.Dispose();
-            if (_clientSecret != null)
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
             {
-                _clientSecret.Dispose();
+                _httpClient.Dispose();
+        
+                // Dispose of the Bitwarden server process
+                if (_serveProcess != null)
+                {
+                    try
+                    {
+                        if (!_serveProcess.HasExited)
+                        {
+                            _serveProcess.Kill();
+                            _serveProcess.WaitForExit(5000); // Wait up to 5 seconds for the process to exit
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("Error while killing Bitwarden server process", ex);
+                    }
+                    finally
+                    {
+                        _serveProcess.Dispose();
+                        _serveProcess = null;
+                    }
+                }
+
+                _initializationLock.Dispose();
+                _autoLockTimer?.Dispose();
+                if (_clientSecret != null)
+                {
+                    _clientSecret.Dispose();
+                }
             }
         }
 
@@ -1137,6 +1345,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
             
             return string.Empty;
+        }
+
+        ~Main()
+        {
+            Dispose(false);
         }
     }
 
