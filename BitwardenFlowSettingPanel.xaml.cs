@@ -2,6 +2,8 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Security;
+using System.Runtime.InteropServices;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -22,7 +24,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _updateSettings = updateSettings;
             
             ClientIdTextBox.Text = _settings.ClientId;
-            ClientSecretBox.Password = SecurePasswordHandler.ConvertToUnsecureString(_settings.ClientSecret);
+            
+            // We'll set the Password property of ClientSecretBox to a placeholder value
+            // The actual secret will be retrieved only when needed
+            ClientSecretBox.Password = SecureCredentialManager.RetrieveCredential(_settings.ClientId) != null 
+                ? "********" // Placeholder for when a secret exists
+                : string.Empty;
             
             LogTraceCheckBox.IsChecked = _settings.LogTrace;
             LogDebugCheckBox.IsChecked = _settings.LogDebug;
@@ -38,24 +45,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             NotifyUsernameCopyCheckBox.IsChecked = _settings.NotifyOnUsernameCopy;
             NotifyUriCopyCheckBox.IsChecked = _settings.NotifyOnUriCopy;
             NotifyTotpCopyCheckBox.IsChecked = _settings.NotifyOnTotpCopy;
-        }
-
-        private void ClientIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_settings != null && _settings.ClientId != ClientIdTextBox.Text)
-            {
-                _settings.ClientId = ClientIdTextBox.Text;
-                _updateSettings?.Invoke(_settings);
-            }
-        }
-
-        private void ClientSecretBox_PasswordChanged(object sender, RoutedEventArgs e)
-        {
-            if (_settings != null)
-            {
-                _settings.ClientSecret = SecurePasswordHandler.ConvertToSecureString(ClientSecretBox.Password);
-                _updateSettings?.Invoke(_settings);
-            }
         }
 
         private void LogLevelCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -126,6 +115,33 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     case "NotifyTotpCopyCheckBox":
                         _settings.NotifyOnTotpCopy = checkBox.IsChecked ?? false;
                         break;
+                }
+                _updateSettings?.Invoke(_settings);
+            }
+        }
+
+        private void ClientIdTextBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_settings != null && _settings.ClientId != ClientIdTextBox.Text)
+            {
+                _settings.ClientId = ClientIdTextBox.Text;
+                _updateSettings?.Invoke(_settings);
+            }
+        }
+
+        private void ClientSecretBox_PasswordChanged(object sender, RoutedEventArgs e)
+        {
+            if (_settings != null)
+            {
+                if (ClientSecretBox.Password != "********") // Only save if it's not our placeholder
+                {
+                    var securePassword = new SecureString();
+                    foreach (char c in ClientSecretBox.Password)
+                    {
+                        securePassword.AppendChar(c);
+                    }
+                    SecureCredentialManager.SaveCredential(_settings.ClientId, securePassword);
+                    ClientSecretBox.Password = "********"; // Reset to placeholder after saving
                 }
                 _updateSettings?.Invoke(_settings);
             }

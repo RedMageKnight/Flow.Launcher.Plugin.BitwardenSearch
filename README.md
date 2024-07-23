@@ -30,6 +30,7 @@ Install from the Plugin Store from the Flow Launcher settings menu or type the f
     <ul>
       <li>Instructions for the API stuff can be found in the plugin settings menu.</li>
     </ul>
+    <li>You will need to restart Flow Launcher in order for the credentials in the plugin settings to take effect. This is not required when changing any other setting in the plugin.
   </ul>
   <li>Type <code>bw</code> before your search-term to start populating items in your vault.
   <li>Adding sub-command <code>/lock</code> or <code>/unlock</code> after <code>bw</code> (make sure to include a space between them) will allow you to manually lock and unlock the vault respectively. 

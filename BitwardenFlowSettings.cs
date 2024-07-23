@@ -11,23 +11,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("clientId")]
         public string ClientId { get; set; } = string.Empty;
 
-        [JsonIgnore]
-        public SecureString ClientSecret { get; set; } = new SecureString();
-
-        [JsonProperty("clientSecret")]
-        public string ClientSecretJson
-        {
-            get => SecurePasswordHandler.ConvertToUnsecureString(ClientSecret);
-            set
-            {
-                if (ClientSecret != null)
-                {
-                    ClientSecret.Dispose();
-                }
-                ClientSecret = SecurePasswordHandler.ConvertToSecureString(value);
-            }
-        }
-
         [JsonProperty("sessionKey")]
         public string SessionKey { get; set; } = string.Empty;
 

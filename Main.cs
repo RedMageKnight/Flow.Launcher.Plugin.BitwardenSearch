@@ -13,6 +13,7 @@ using System.Diagnostics;
 using System.IO;
 using Newtonsoft.Json;
 using System.Security;
+using System.Runtime.InteropServices;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -33,6 +34,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private bool _isLocked = false;
         private Timer? _autoLockTimer;
         private bool _needsInitialSetup = false;
+        private SecureString? _clientSecret;
 
         public Main()
         {
@@ -104,6 +106,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             _context = context;
             _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
+            _clientSecret = SecureCredentialManager.RetrieveCredential(_settings.ClientId);
             await Task.Run(() => 
             {
                 Logger.Initialize(context.CurrentPluginMetadata.PluginDirectory, _settings);
@@ -174,7 +177,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task EnsureBitwardenSetup()
         {
-            if (string.IsNullOrEmpty(_settings.ClientId) || _settings.ClientSecret.Length == 0)
+            if (string.IsNullOrEmpty(_settings.ClientId) || _clientSecret == null || _clientSecret.Length == 0)
             {
                 Logger.Log("Client ID or Client Secret not set. Initial setup required.", LogLevel.Info);
                 _needsInitialSetup = true;
@@ -247,6 +250,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                     Logger.Log("Existing session is invalid, need to re-authenticate", LogLevel.Info);
                 }
+
+                if (_clientSecret == null || _clientSecret.Length == 0)
+                {
+                    Logger.Log("Client secret is missing, vault is locked", LogLevel.Info);
+                    _isLocked = true;
+                    return;
+                }
+
+                // At this point, we have a client secret but no valid session.
+                // We should prompt the user to enter their master password to unlock the vault.
+                // This should be handled in the UI layer (e.g., in HandleBitwardenSearch),
+                // so we'll just set the locked state here.
 
                 Logger.Log("No valid session found, vault is locked", LogLevel.Info);
                 _isLocked = true;
@@ -378,6 +393,24 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task<List<Result>> HandleBitwardenSearch(Query query, CancellationToken token)
         {
+            if (_clientSecret == null || _clientSecret.Length == 0)
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Bitwarden client secret is missing",
+                        SubTitle = "Please set up the client secret in the plugin settings",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.OpenSettingDialog();
+                            return true;
+                        }
+                    }
+                };
+            }
+
             if (query.FirstSearch?.ToLower() == "/lock")
             {
                 return new List<Result>
@@ -623,21 +656,15 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 Logger.Log("Attempting to unlock vault", LogLevel.Debug);
                 
-                string? clientSecret = null;
-                if (_settings.ClientSecret != null)
+                if (_clientSecret == null || _clientSecret.Length == 0)
                 {
-                    clientSecret = SecurePasswordHandler.ConvertToUnsecureString(_settings.ClientSecret);
-                }
-                
-                if (string.IsNullOrEmpty(clientSecret))
-                {
-                    Logger.Log("Client secret is null or empty", LogLevel.Error);
+                    Logger.Log("Client secret is missing", LogLevel.Error);
                     return new List<Result>
                     {
                         new Result
                         {
                             Title = "Failed to unlock vault",
-                            SubTitle = "Client secret is missing or invalid",
+                            SubTitle = "Client secret is missing. Please set it up in the plugin settings.",
                             IcoPath = "Images/bitwarden.png"
                         }
                     };
@@ -657,73 +684,89 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
 
-                // Set environment variables for client ID and secret
+                // Set environment variables for client ID
                 unlockProcess.StartInfo.EnvironmentVariables["BW_CLIENTID"] = _settings.ClientId;
-                unlockProcess.StartInfo.EnvironmentVariables["BW_CLIENTSECRET"] = clientSecret;
 
-                Logger.Log("Starting unlock process", LogLevel.Debug);
-                unlockProcess.Start();
-
-                // Write only the master password
-                Logger.Log("Writing master password to process", LogLevel.Debug);
-                await unlockProcess.StandardInput.WriteLineAsync(password);
-                await unlockProcess.StandardInput.FlushAsync();
-
-                Logger.Log("Reading session key from process output", LogLevel.Debug);
-                string sessionKey = await unlockProcess.StandardOutput.ReadToEndAsync();
-                string errorOutput = await unlockProcess.StandardError.ReadToEndAsync();
-
-                // Clear the client secret from memory
-                clientSecret = null;
-
-                if (!string.IsNullOrWhiteSpace(errorOutput))
+                // Handle the client secret securely
+                IntPtr clientSecretPtr = IntPtr.Zero;
+                try
                 {
-                    // Log the error output as debug information instead of an error
-                    Logger.Log($"CLI process output: {errorOutput}", LogLevel.Debug);
-                }
+                    clientSecretPtr = Marshal.SecureStringToGlobalAllocUnicode(_clientSecret);
+                    unlockProcess.StartInfo.EnvironmentVariables["BW_CLIENTSECRET"] = Marshal.PtrToStringUni(clientSecretPtr);
 
-                if (string.IsNullOrWhiteSpace(sessionKey))
-                {
-                    Logger.Log("Failed to obtain session key", LogLevel.Error);
+                    Logger.Log("Starting unlock process", LogLevel.Debug);
+                    unlockProcess.Start();
+
+                    // Write only the master password
+                    Logger.Log("Writing master password to process", LogLevel.Debug);
+                    await unlockProcess.StandardInput.WriteLineAsync(password);
+                    await unlockProcess.StandardInput.FlushAsync();
+
+                    Logger.Log("Reading session key from process output", LogLevel.Debug);
+                    string sessionKey = await unlockProcess.StandardOutput.ReadToEndAsync();
+                    string errorOutput = await unlockProcess.StandardError.ReadToEndAsync();
+
+                    if (!string.IsNullOrWhiteSpace(errorOutput))
+                    {
+                        Logger.Log($"CLI process output: {errorOutput}", LogLevel.Debug);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(sessionKey))
+                    {
+                        Logger.Log("Failed to obtain session key", LogLevel.Error);
+                        return new List<Result>
+                        {
+                            new Result
+                            {
+                                Title = "Failed to unlock vault",
+                                SubTitle = "Incorrect credentials or server error",
+                                IcoPath = "Images/bitwarden.png"
+                            }
+                        };
+                    }
+
+                    Logger.Log("Session key obtained successfully", LogLevel.Debug);
+                    _settings.SessionKey = sessionKey.Trim();
+                    _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                    UpdateHttpClientAuthorization();
+                    _isLocked = false;
+                    _needsInitialSetup = false;
+
+                    Logger.Log($"Attempting to start Bitwarden server with session key: {_settings.SessionKey.Substring(0, Math.Min(10, _settings.SessionKey.Length))}...", LogLevel.Debug);
+                    await StartBitwardenServer();
+                    Logger.Log($"Bitwarden server process ID: {_serveProcess?.Id}", LogLevel.Debug);
+
+                    SetupAutoLockTimer();
+
+                    Logger.Log("Vault unlocked successfully", LogLevel.Info);
                     return new List<Result>
                     {
                         new Result
                         {
-                            Title = "Failed to unlock vault",
-                            SubTitle = "Incorrect credentials or server error",
+                            Title = "Bitwarden vault unlocked",
+                            SubTitle = "You can now search for your items",
                             IcoPath = "Images/bitwarden.png"
                         }
                     };
                 }
-
-                Logger.Log("Session key obtained successfully", LogLevel.Debug);
-                _settings.SessionKey = sessionKey.Trim();
-                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-                UpdateHttpClientAuthorization();
-                _isLocked = false;
-                _needsInitialSetup = false;
-
-                SetupAutoLockTimer();
-
-                Logger.Log("Vault unlocked successfully", LogLevel.Info);
-                return new List<Result>
+                finally
                 {
-                    new Result
+                    if (clientSecretPtr != IntPtr.Zero)
                     {
-                        Title = "Bitwarden vault unlocked",
-                        SubTitle = "You can now search for your items",
-                        IcoPath = "Images/bitwarden.png"
+                        Marshal.ZeroFreeGlobalAllocUnicode(clientSecretPtr);
                     }
-                };
+                    // Clear the environment variable
+                    unlockProcess.StartInfo.EnvironmentVariables.Remove("BW_CLIENTSECRET");
+                }
             }
             catch (Exception ex)
             {
-                Logger.LogError("Failed to unlock Bitwarden vault", ex);
+                Logger.LogError("Failed to unlock Bitwarden vault or start server", ex);
                 return new List<Result>
                 {
                     new Result
                     {
-                        Title = "Error unlocking vault",
+                        Title = "Error unlocking vault or starting server",
                         SubTitle = "Check logs for details",
                         IcoPath = "Images/bitwarden.png"
                     }
@@ -862,10 +905,16 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             try
             {
+                if (_serveProcess == null || _serveProcess.HasExited)
+                {
+                    Logger.Log("Bitwarden server is not running. Attempting to start...", LogLevel.Warning);
+                    await StartBitwardenServer();
+                }
+
                 var encodedSearchTerm = Uri.EscapeDataString(searchTerm);
                 var url = $"{ApiBaseUrl}/list/object/items?search={encodedSearchTerm}";
                 Logger.Log($"Sending request to: {url}", LogLevel.Debug);
-
+                
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
                 cts.CancelAfter(TimeSpan.FromSeconds(20));
 
@@ -973,6 +1022,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _initializationLock.Dispose();
             Logger.Log("Plugin disposed", LogLevel.Debug);
             _autoLockTimer?.Dispose();
+            if (_clientSecret != null)
+            {
+                _clientSecret.Dispose();
+            }
         }
 
         private static readonly object _faviconLock = new object();
