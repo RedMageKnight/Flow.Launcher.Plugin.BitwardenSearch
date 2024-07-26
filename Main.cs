@@ -36,7 +36,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private Timer? _autoLockTimer;
         private bool _needsInitialSetup = false;
         private SecureString? _clientSecret;
-        private List<Result>? _emptyQueryResults;
 
         public Main()
         {
@@ -571,7 +570,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return new List<Result>();
         }
 
-       private async Task<List<Result>> HandleBitwardenSearch(Query query, CancellationToken token)
+        private async Task<List<Result>> HandleBitwardenSearch(Query query, CancellationToken token)
         {
             if (_clientSecret == null || _clientSecret.Length == 0)
             {
@@ -674,27 +673,48 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             if (string.IsNullOrWhiteSpace(query.Search))
             {
-                return GetEmptyQueryResults();
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Search Bitwarden",
+                        SubTitle = "Type to search your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png"
+                    },
+                    new Result
+                    {
+                        Title = "/lock",
+                        SubTitle = "Lock your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /lock");
+                            return false;
+                        }
+                    },
+                    new Result
+                    {
+                        Title = "/unlock",
+                        SubTitle = "Unlock your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /unlock ");
+                            return false;
+                        }
+                    }
+                };
             }
 
-            // Only apply debounce for non-empty queries
-            if (!string.IsNullOrWhiteSpace(query.Search))
-            {
-                _debounceTokenSource.Cancel();
-                _debounceTokenSource = new CancellationTokenSource();
-
-                try
-                {
-                    await Task.Delay(DebounceDelay, _debounceTokenSource.Token);
-                }
-                catch (TaskCanceledException)
-                {
-                    return new List<Result>();
-                }
-            }
+            // Cancel any previous debounce task
+            _debounceTokenSource.Cancel();
+            _debounceTokenSource = new CancellationTokenSource();
 
             try
             {
+                // Delay for debounce
+                await Task.Delay(DebounceDelay, _debounceTokenSource.Token);
+
                 Logger.Log("Searching Bitwarden", LogLevel.Info);
 
                 var items = await SearchBitwardenAsync(query.Search, token);
@@ -746,6 +766,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log($"Total results generated: {results.Count}", LogLevel.Debug);
                 return results;
             }
+            catch (TaskCanceledException)
+            {
+                // Debounce was canceled, return empty list
+                return new List<Result>();
+            }
             catch (Exception ex)
             {
                 Logger.LogError("Error during query execution", ex);
@@ -764,46 +789,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
             }
-        }
-
-        private List<Result> GetEmptyQueryResults()
-        {
-            // Cache this result to avoid recreating it every time
-            if (_emptyQueryResults == null)
-            {
-                _emptyQueryResults = new List<Result>
-                {
-                    new Result
-                    {
-                        Title = "Search Bitwarden",
-                        SubTitle = "Type to search your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png"
-                    },
-                    new Result
-                    {
-                        Title = "/lock",
-                        SubTitle = "Lock your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /lock");
-                            return false;
-                        }
-                    },
-                    new Result
-                    {
-                        Title = "/unlock",
-                        SubTitle = "Unlock your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /unlock ");
-                            return false;
-                        }
-                    }
-                };
-            }
-            return _emptyQueryResults;
         }
 
         private List<Result> LockVault()
