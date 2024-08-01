@@ -68,5 +68,9 @@
             <CheckBox x:Name="NotifyUriCopyCheckBox" Content="Notify on URI copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
             <CheckBox x:Name="NotifyTotpCopyCheckBox" Content="Notify on TOTP code copy" Margin="0,5,0,0" Checked="NotificationCheckBox_Changed" Unchecked="NotificationCheckBox_Changed"/>
         </StackPanel>
+        <TextBlock x:Name="VerificationStatusTextBlock" 
+               Margin="0,20,0,0" 
+               TextWrapping="Wrap" 
+               Foreground="Gray"/>
     </StackPanel>
 </UserControl>

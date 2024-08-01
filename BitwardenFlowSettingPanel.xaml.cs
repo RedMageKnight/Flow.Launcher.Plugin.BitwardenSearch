@@ -188,5 +188,29 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             SaveClientSecretButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#007bff"));
             _resetButtonTimer?.Stop();
         }
+
+        public void SetVerificationStatus(string status)
+        {
+            if (!Dispatcher.CheckAccess())
+            {
+                Dispatcher.Invoke(() => SetVerificationStatus(status));
+                return;
+            }
+
+            VerificationStatusTextBlock.Text = status;
+
+            if (status.Contains("Error"))
+            {
+                VerificationStatusTextBlock.Foreground = Brushes.Red;
+            }
+            else if (status.Contains("success"))
+            {
+                VerificationStatusTextBlock.Foreground = Brushes.Green;
+            }
+            else
+            {
+                VerificationStatusTextBlock.Foreground = Brushes.Gray;
+            }
+        }
     }
 }

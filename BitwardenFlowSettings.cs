@@ -15,13 +15,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public string SessionKey { get; set; } = string.Empty;
 
         [JsonProperty("logTrace")]
-        public bool LogTrace { get; set; } = false;
+        public bool LogTrace { get; set; } = true;
 
         [JsonProperty("logDebug")]
-        public bool LogDebug { get; set; } = false;
+        public bool LogDebug { get; set; } = true;
 
         [JsonProperty("logInfo")]
-        public bool LogInfo { get; set; } = false;
+        public bool LogInfo { get; set; } = true;
 
         [JsonProperty("logWarning")]
         public bool LogWarning { get; set; } = true;

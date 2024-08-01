@@ -20,6 +20,10 @@
     <EnableDefaultPageItems>false</EnableDefaultPageItems>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <CleanBeforeBuild>true</CleanBeforeBuild>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <DebugSymbols>false</DebugSymbols>
     <DebugType>None</DebugType>
@@ -53,15 +57,36 @@
     </Compile>
   </ItemGroup>
 
+  <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+    <Exec Command="powershell.exe -ExecutionPolicy Bypass -Command &quot;&amp; {Start-Process PowerShell.exe -ArgumentList '-ExecutionPolicy Bypass -File \&quot;$(ProjectDir)pre-build-cleanup.ps1\&quot;' -Verb RunAs -Wait}&quot;" />
+  </Target>
+
   <Target Name="CopyPluginToFlowLauncherDirectory" AfterTargets="Build">
+    <!-- Read version from plugin.json using PowerShell -->
+    <PropertyGroup>
+      <PowerShellExe Condition=" '$(PowerShellExe)'=='' ">%WINDIR%\System32\WindowsPowerShell\v1.0\powershell.exe</PowerShellExe>
+      <PluginJsonPath>$(ProjectDir)plugin.json</PluginJsonPath>
+    </PropertyGroup>
+    <Exec Command="$(PowerShellExe) -NonInteractive -ExecutionPolicy Bypass -Command &quot;&amp; { (Get-Content '$(PluginJsonPath)' | ConvertFrom-Json).Version }&quot;" ConsoleToMSBuild="true">
+      <Output TaskParameter="ConsoleOutput" PropertyName="PluginVersion" />
+    </Exec>
+
+    <!-- Set the output directory -->
     <PropertyGroup>
       <FlowLauncherPluginsDirectory Condition="'$(FlowLauncherPluginsDirectory)' == ''">$([System.Environment]::GetEnvironmentVariable('FLOW_LAUNCHER_PLUGIN_DIR'))</FlowLauncherPluginsDirectory>
-      <FlowLauncherPluginsDirectory Condition="'$(FlowLauncherPluginsDirectory)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))\FlowLauncher\app-1.18.0\Plugins\</FlowLauncherPluginsDirectory>
+      <FlowLauncherPluginsDirectory Condition="'$(FlowLauncherPluginsDirectory)' == ''">$([System.Environment]::GetFolderPath(SpecialFolder.ApplicationData))\FlowLauncher\Plugins\</FlowLauncherPluginsDirectory>
+      <PluginOutputDirectory>Bitwarden-$(PluginVersion)</PluginOutputDirectory>
     </PropertyGroup>
-    <Message Text="Copying plugin to $(FlowLauncherPluginsDirectory)Flow.Launcher.Plugin.BitwardenSearch" Importance="high" />
+
+    <!-- Copy files -->
+    <Message Text="Copying plugin to $(FlowLauncherPluginsDirectory)$(PluginOutputDirectory)" Importance="high" />
     <ItemGroup>
       <PluginFiles Include="$(OutputPath)**\*.*" />
     </ItemGroup>
-    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(FlowLauncherPluginsDirectory)Flow.Launcher.Plugin.BitwardenSearch\%(RecursiveDir)" />
+    <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(FlowLauncherPluginsDirectory)$(PluginOutputDirectory)\%(RecursiveDir)" />
+  </Target>
+
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+    <Exec Command="type C:\Temp\pre-build-cleanup.log" />
   </Target>
 </Project>
