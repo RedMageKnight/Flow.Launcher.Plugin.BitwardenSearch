@@ -72,47 +72,67 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public void Init(PluginInitContext context)
         {
-            _context = context;
-            var pluginDirectory = context.CurrentPluginMetadata.PluginDirectory;
-            
-            // Load settings
-            _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
-            
-            // If settings are null, initialize with default values
-            if (_settings == null)
+            try
             {
-                _settings = new BitwardenFlowSettings();
-                context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                _context = context;
+                var pluginDirectory = context.CurrentPluginMetadata.PluginDirectory;
+                
+                // Load settings
+                _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
+                
+                // If settings are null, initialize with default values
+                if (_settings == null)
+                {
+                    _settings = new BitwardenFlowSettings();
+                    context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                }
+
+                // Initialize logger
+                Logger.Initialize(pluginDirectory, _settings);
+                Logger.Log("Plugin initialization started", LogLevel.Info);
+
+                // Don't wait for VerifyAndApplySettings or EnsureInitialized
+                Task.Run(async () => 
+                {
+                    try 
+                    {
+                        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                        await Task.WhenAny(
+                            Task.Run(async () => {
+                                await VerifyAndApplySettings();
+                                await EnsureInitialized();
+                            }),
+                            Task.Delay(30000, cts.Token)
+                        );
+                        if (cts.IsCancellationRequested)
+                        {
+                            Logger.Log("Initialization timed out after 30 seconds", LogLevel.Error);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("Error during background initialization", ex);
+                    }
+                });
+
+                Logger.Log("Plugin initialization completed", LogLevel.Info);
             }
-
-            // Initialize logger
-            Logger.Initialize(pluginDirectory, _settings);
-            Logger.Log("Plugin initialization started", LogLevel.Info);
-
-            // Start the initialization process
-            _ = Task.Run(async () =>
+            catch (Exception ex)
             {
-                try
-                {
-                    await EnsureInitialized();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError("Error during background initialization", ex);
-                }
-            });
+                Logger.LogError("Error during plugin initialization", ex);
+            }
         }
 
         public async Task InitAsync(PluginInitContext context)
         {
             _context = context;
             _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
-            _clientSecret = SecureCredentialManager.RetrieveCredential(_settings.ClientId);
-            await Task.Run(() => 
-            {
-                Logger.Initialize(context.CurrentPluginMetadata.PluginDirectory, _settings);
-                Logger.Log("Plugin initialization started", LogLevel.Info);
-            });
+            Logger.Initialize(context.CurrentPluginMetadata.PluginDirectory, _settings);
+            Logger.Log("Plugin initialization started", LogLevel.Info);
+
+            // Verify and apply settings
+            await VerifyAndApplySettings();
+
             Logger.Log("Plugin initialization completed", LogLevel.Info);
 
             // Start the initialization process
@@ -128,6 +148,65 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
             });
             SetupAutoLockTimer();
+        }
+
+        private bool _hasShownSetupMessage = false;
+
+        private async Task VerifyAndApplySettings()
+        {
+            bool settingsChanged = false;
+
+            if (string.IsNullOrEmpty(_settings.ClientId))
+            {
+                _needsInitialSetup = true;
+                Logger.Log("Client ID is not set", LogLevel.Warning);
+            }
+
+            var clientSecret = SecureCredentialManager.RetrieveCredential(_settings.ClientId);
+            if (clientSecret == null || clientSecret.Length == 0)
+            {
+                _needsInitialSetup = true;
+                Logger.Log("Client Secret is not set", LogLevel.Warning);
+            }
+
+            if (_needsInitialSetup && !_hasShownSetupMessage)
+            {
+                _context.API.ShowMsg("Bitwarden Setup Required", "Please set up your Client ID and Client Secret in the plugin settings.");
+                _hasShownSetupMessage = true;
+            }
+            else if (!_needsInitialSetup)
+            {
+                _clientSecret = clientSecret;
+                settingsChanged = true;
+
+                // Verify API key
+                var apiKeyValid = await VerifyApiKey();
+                if (!apiKeyValid)
+                {
+                    Logger.Log("API key verification failed, attempting login", LogLevel.Warning);
+                    apiKeyValid = await LoginWithApiKey();
+                    if (!apiKeyValid)
+                    {
+                        Logger.Log("Login attempt failed", LogLevel.Error);
+                        _context.API.ShowMsg("API Key Invalid", "The provided API key is invalid or login failed. Please check your settings.");
+                        return; // Exit the method to prevent further initialization
+                    }
+                    else
+                    {
+                        Logger.Log("Login successful", LogLevel.Info);
+                    }
+                }
+                else
+                {
+                    Logger.Log("API key verification successful", LogLevel.Info);
+                }
+            }
+
+            if (settingsChanged)
+            {
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                Logger.Log("Settings verified and applied", LogLevel.Info);
+            }
         }
 
         private void SetupAutoLockTimer()
@@ -147,8 +226,162 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             if (!_isLocked)
             {
-                LockVault();
+                _settings.SessionKey = string.Empty;
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                UpdateHttpClientAuthorization();
+                _isLocked = true;
                 Logger.Log("Vault auto-locked due to inactivity", LogLevel.Info);
+            }
+        }
+
+        private async Task<bool> IsLoggedIn()
+        {
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "bw",
+                    Arguments = "login --check",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.Start();
+            string output = await process.StandardOutput.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            return output.Trim().Equals("You are logged in!", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private async Task<bool> LoginWithApiKey()
+        {
+            try
+            {
+                var clientId = _settings.ClientId;
+                var clientSecret = SecureCredentialManager.RetrieveCredential(_settings.ClientId);
+
+                if (string.IsNullOrEmpty(clientId) || clientSecret == null || clientSecret.Length == 0)
+                {
+                    Logger.Log("API key information is missing", LogLevel.Error);
+                    return false;
+                }
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = "login --apikey",
+                        UseShellExecute = false,
+                        RedirectStandardInput = true,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+
+                Logger.Log("Starting Bitwarden CLI login process", LogLevel.Debug);
+                process.Start();
+
+                Logger.Log("Sending client ID", LogLevel.Debug);
+                await process.StandardInput.WriteLineAsync(clientId);
+                Logger.Log("Client ID sent", LogLevel.Debug);
+                
+                Logger.Log("Sending client secret", LogLevel.Debug);
+                var clientSecretString = new System.Net.NetworkCredential(string.Empty, clientSecret).Password;
+                await process.StandardInput.WriteLineAsync(clientSecretString);
+                await process.StandardInput.FlushAsync();
+                Logger.Log("Client secret sent", LogLevel.Debug);
+
+                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+
+                Logger.Log("Waiting for process to complete", LogLevel.Debug);
+                if (await Task.WhenAny(process.WaitForExitAsync(cts.Token), Task.Delay(15000, cts.Token)) == Task.Delay(15000, cts.Token))
+                {
+                    Logger.Log("Login process timed out, forcibly terminating", LogLevel.Error);
+                    process.Kill(true);
+                    return false;
+                }
+
+                string output = await outputTask;
+                string error = await errorTask;
+
+                Logger.Log($"LoginWithApiKey output: {output}", LogLevel.Debug);
+                Logger.Log($"LoginWithApiKey error: {error}", LogLevel.Debug);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Logger.Log($"Error during login: {error}", LogLevel.Error);
+                    return false;
+                }
+
+                bool loginSuccessful = output.Contains("You are logged in!");
+                Logger.Log($"Login {(loginSuccessful ? "successful" : "failed")}", LogLevel.Info);
+                return loginSuccessful;
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Log("Login operation timed out", LogLevel.Error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Exception during login process", ex);
+                return false;
+            }
+        }
+
+        private async Task<bool> VerifyApiKey()
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = "login --check",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+
+                process.Start();
+                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+
+                if (await Task.WhenAny(process.WaitForExitAsync(cts.Token), Task.Delay(10000, cts.Token)) == Task.Delay(10000, cts.Token))
+                {
+                    Logger.Log("VerifyApiKey process timed out", LogLevel.Error);
+                    process.Kill();
+                    return false;
+                }
+
+                string output = await outputTask;
+                string error = await errorTask;
+
+                Logger.Log($"VerifyApiKey output: {output}", LogLevel.Debug);
+                Logger.Log($"VerifyApiKey error: {error}", LogLevel.Debug);
+
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Logger.Log($"Error checking login status: {error}", LogLevel.Error);
+                    return false;
+                }
+
+                return output.Trim().Equals("You are logged in!", StringComparison.OrdinalIgnoreCase);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Exception during API key verification", ex);
+                return false;
             }
         }
 
@@ -834,19 +1067,23 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             try
             {
                 Logger.Log("Attempting to unlock vault", LogLevel.Debug);
-                
-                if (_clientSecret == null || _clientSecret.Length == 0)
+
+                // Check if logged in
+                if (!await IsLoggedIn())
                 {
-                    Logger.Log("Client secret is missing", LogLevel.Error);
-                    return new List<Result>
+                    Logger.Log("Not logged in. Attempting to log in.", LogLevel.Info);
+                    if (!await LoginWithApiKey())
                     {
-                        new Result
+                        return new List<Result>
                         {
-                            Title = "Failed to unlock vault",
-                            SubTitle = "Client secret is missing. Please set it up in the plugin settings.",
-                            IcoPath = "Images/bitwarden.png"
-                        }
-                    };
+                            new Result
+                            {
+                                Title = "Failed to log in",
+                                SubTitle = "Check your API key settings",
+                                IcoPath = "Images/bitwarden.png"
+                            }
+                        };
+                    }
                 }
 
                 var unlockProcess = new Process
@@ -854,7 +1091,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = "bw",
-                        Arguments = "unlock --raw",
+                        Arguments = "unlock",
                         UseShellExecute = false,
                         RedirectStandardInput = true,
                         RedirectStandardOutput = true,
@@ -863,94 +1100,76 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
 
-                // Set environment variables for client ID
-                unlockProcess.StartInfo.EnvironmentVariables["BW_CLIENTID"] = _settings.ClientId;
+                Logger.Log("Starting unlock process", LogLevel.Debug);
+                unlockProcess.Start();
 
-                // Handle the client secret securely
-                IntPtr clientSecretPtr = IntPtr.Zero;
-                try
+                Logger.Log("Writing master password to process", LogLevel.Debug);
+                await unlockProcess.StandardInput.WriteLineAsync(password);
+                await unlockProcess.StandardInput.FlushAsync();
+
+                Logger.Log("Reading session key from process output", LogLevel.Debug);
+                string output = await unlockProcess.StandardOutput.ReadToEndAsync();
+                string errorOutput = await unlockProcess.StandardError.ReadToEndAsync();
+
+                if (!string.IsNullOrWhiteSpace(errorOutput))
                 {
-                    clientSecretPtr = Marshal.SecureStringToGlobalAllocUnicode(_clientSecret);
-                    unlockProcess.StartInfo.EnvironmentVariables["BW_CLIENTSECRET"] = Marshal.PtrToStringUni(clientSecretPtr);
+                    Logger.Log($"CLI process error output: {errorOutput}", LogLevel.Error);
+                }
 
-                    Logger.Log("Starting unlock process", LogLevel.Debug);
-                    unlockProcess.Start();
+                Logger.Log($"Unlock process output: {output}", LogLevel.Debug);
 
-                    // Write only the master password
-                    Logger.Log("Writing master password to process", LogLevel.Debug);
-                    await unlockProcess.StandardInput.WriteLineAsync(password);
-                    await unlockProcess.StandardInput.FlushAsync();
+                string sessionKey = ExtractSessionKey(output);
 
-                    Logger.Log("Reading session key from process output", LogLevel.Debug);
-                    string sessionKey = await unlockProcess.StandardOutput.ReadToEndAsync();
-                    string errorOutput = await unlockProcess.StandardError.ReadToEndAsync();
-
-                    if (!string.IsNullOrWhiteSpace(errorOutput))
-                    {
-                        Logger.Log($"CLI process output: {errorOutput}", LogLevel.Debug);
-                    }
-
-                    if (string.IsNullOrWhiteSpace(sessionKey))
-                    {
-                        Logger.Log("Failed to obtain session key", LogLevel.Error);
-                        return new List<Result>
-                        {
-                            new Result
-                            {
-                                Title = "Failed to unlock vault",
-                                SubTitle = "Incorrect credentials or server error",
-                                IcoPath = "Images/bitwarden.png"
-                            }
-                        };
-                    }
-
-                    Logger.Log("Session key obtained successfully", LogLevel.Debug);
-                    _settings.SessionKey = sessionKey.Trim();
-                    _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-                    UpdateHttpClientAuthorization();
-                    _isLocked = false;
-                    _needsInitialSetup = false;
-
-                    Logger.Log($"Attempting to start Bitwarden server with session key: {_settings.SessionKey.Substring(0, Math.Min(10, _settings.SessionKey.Length))}...", LogLevel.Debug);
-                    await StartBitwardenServer();
-                    Logger.Log($"Bitwarden server process ID: {_serveProcess?.Id}", LogLevel.Debug);
-
-                    SetupAutoLockTimer();
-
-                    Logger.Log("Vault unlocked successfully", LogLevel.Info);
+                if (string.IsNullOrWhiteSpace(sessionKey))
+                {
+                    Logger.Log("Failed to obtain session key", LogLevel.Error);
                     return new List<Result>
                     {
                         new Result
                         {
-                            Title = "Bitwarden vault unlocked",
-                            SubTitle = "You can now search for your items",
+                            Title = "Failed to unlock vault",
+                            SubTitle = "Incorrect password or server error",
                             IcoPath = "Images/bitwarden.png"
                         }
                     };
                 }
-                finally
-                {
-                    if (clientSecretPtr != IntPtr.Zero)
-                    {
-                        Marshal.ZeroFreeGlobalAllocUnicode(clientSecretPtr);
-                    }
-                    // Clear the environment variable
-                    unlockProcess.StartInfo.EnvironmentVariables.Remove("BW_CLIENTSECRET");
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Failed to unlock Bitwarden vault or start server", ex);
+
+                Logger.Log("Session key obtained successfully", LogLevel.Debug);
+                _settings.SessionKey = sessionKey.Trim();
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                UpdateHttpClientAuthorization();
+                _isLocked = false;
+
+                Logger.Log("Vault unlocked successfully", LogLevel.Info);
                 return new List<Result>
                 {
                     new Result
                     {
-                        Title = "Error unlocking vault or starting server",
+                        Title = "Bitwarden vault unlocked",
+                        SubTitle = "You can now search for your items",
+                        IcoPath = "Images/bitwarden.png"
+                    }
+                };
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Failed to unlock Bitwarden vault", ex);
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Error unlocking vault",
                         SubTitle = "Check logs for details",
                         IcoPath = "Images/bitwarden.png"
                     }
                 };
             }
+        }
+        
+        private string ExtractSessionKey(string output)
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(output, @"BW_SESSION=""(.+?)""");
+            return match.Success ? match.Groups[1].Value : string.Empty;
         }
 
         private enum ActionType
@@ -1182,7 +1401,47 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public Control CreateSettingPanel()
         {
-            return new BitwardenFlowSettingPanel(_settings, UpdateSettings);
+            return new BitwardenFlowSettingPanel(_settings, updatedSettings =>
+            {
+                _settings = updatedSettings;
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                Task.Run(async () =>
+                {
+                    await VerifyAndApplySettings();
+                    return "Settings verified and applied successfully.";
+                }).ContinueWith(task =>
+                {
+                    string message = task.Exception != null 
+                        ? "Error verifying settings. Please check logs." 
+                        : task.Result;
+                    
+                    if (task.Exception != null)
+                    {
+                        Logger.LogError("Error during settings verification", task.Exception);
+                    }
+
+                    // Use Dispatcher to update UI on the correct thread
+                    Application.Current.Dispatcher.Invoke(() => 
+                    {
+                        if (Application.Current.MainWindow.Content is BitwardenFlowSettingPanel panel)
+                        {
+                            panel.SetVerificationStatus(message);
+                        }
+                    });
+                }, TaskScheduler.FromCurrentSynchronizationContext());
+            });
+        }
+
+        private void SetVerificationStatus(BitwardenFlowSettingPanel? panel, string status)
+        {
+            if (panel != null)
+            {
+                panel.SetVerificationStatus(status);
+            }
+            else
+            {
+                Logger.Log($"Unable to set verification status: {status}", LogLevel.Warning);
+            }
         }
 
         private void UpdateSettings(BitwardenFlowSettings newSettings)
