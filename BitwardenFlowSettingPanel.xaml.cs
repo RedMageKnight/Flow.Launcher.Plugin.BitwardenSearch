@@ -6,6 +6,9 @@ using System.Security;
 using System.Runtime.InteropServices;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Threading.Tasks;
+using System.Diagnostics;
+using Flow.Launcher.Plugin.BitwardenSearch;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
