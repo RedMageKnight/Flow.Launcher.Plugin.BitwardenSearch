@@ -209,7 +209,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             if (!_settings.KeepUnlocked && _settings.LockTime > 0)
             {
-                _autoLockTimer = new Timer(AutoLockVault, null, TimeSpan.FromMinutes(_settings.LockTime), Timeout.InfiniteTimeSpan);
+                _autoLockTimer = new Timer(AutoLockVault, null, TimeSpan.FromMinutes(_settings.LockTime), TimeSpan.FromMinutes(_settings.LockTime));
             }
         }
 
@@ -222,6 +222,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 UpdateHttpClientAuthorization();
                 _isLocked = true;
                 Logger.Log("Vault auto-locked due to inactivity", LogLevel.Info);
+            }
+        }
+
+        private void ResetAutoLockTimer()
+        {
+            if (_autoLockTimer != null && !_settings.KeepUnlocked && _settings.LockTime > 0)
+            {
+                _autoLockTimer.Change(TimeSpan.FromMinutes(_settings.LockTime), TimeSpan.FromMinutes(_settings.LockTime));
             }
         }
 
@@ -604,18 +612,28 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log("Waiting for Bitwarden server to initialize", LogLevel.Debug);
                 await Task.Delay(5000);
 
-                if (_serveProcess.HasExited)
+                // Check if the server is responsive
+                for (int i = 0; i < 5; i++)
                 {
-                    var exitCode = _serveProcess.ExitCode;
-                    Logger.Log($"Bitwarden server process exited unexpectedly with code: {exitCode}", LogLevel.Error);
-                    throw new Exception($"Bitwarden server process exited unexpectedly with code: {exitCode}");
+                    try
+                    {
+                        var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
+                        if (response.IsSuccessStatusCode)
+                        {
+                            Logger.Log("Bitwarden server started successfully", LogLevel.Info);
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Log($"Error checking server status: {ex.Message}", LogLevel.Warning);
+                    }
+
+                    await Task.Delay(1000);
                 }
 
-                using var client = new HttpClient();
-                client.Timeout = TimeSpan.FromSeconds(10);
-                var response = await client.GetAsync($"{ApiBaseUrl}/status");
-                response.EnsureSuccessStatusCode();
-                Logger.Log("Bitwarden server started successfully", LogLevel.Info);
+                Logger.Log("Failed to start Bitwarden server", LogLevel.Error);
+                throw new Exception("Failed to start Bitwarden server");
             }
             catch (Exception ex)
             {
@@ -712,7 +730,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private void UpdateHttpClientAuthorization()
         {
-            if (!_isLocked && !string.IsNullOrEmpty(_settings.SessionKey))
+            if (!string.IsNullOrEmpty(_settings.SessionKey))
             {
                 _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.SessionKey.Trim());
                 Logger.Log("Session key updated", LogLevel.Info);
@@ -720,7 +738,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             else
             {
                 _httpClient.DefaultRequestHeaders.Authorization = null;
-                Logger.Log("Authorization cleared due to locked state or missing session key", LogLevel.Info);
+                Logger.Log("Authorization cleared due to missing session key", LogLevel.Info);
             }
         }
 
@@ -728,31 +746,37 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             try
             {
-                using var process = new Process
+                if (string.IsNullOrEmpty(_settings.SessionKey))
                 {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "bw",
-                        Arguments = $"unlock --check --session {_settings.SessionKey}",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    }
-                };
-
-                process.Start();
-                string output = await process.StandardOutput.ReadToEndAsync();
-                string error = await process.StandardError.ReadToEndAsync();
-                await process.WaitForExitAsync();
-
-                if (!string.IsNullOrEmpty(error))
-                {
-                    Logger.Log($"Error checking vault status: {error}", LogLevel.Error);
-                    return true; // Assume locked if there's an error
+                    Logger.Log("Session key is empty, assuming vault is locked", LogLevel.Debug);
+                    return true;
                 }
 
-                return !output.Contains("Vault is unlocked!");
+                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    Logger.Log($"Status response: {content}", LogLevel.Debug);
+
+                    var status = JsonConvert.DeserializeObject<JObject>(content);
+                    
+                    if (status?["data"]?["template"]?["status"] is JToken statusToken)
+                    {
+                        var vaultStatus = statusToken.ToString();
+                        Logger.Log($"Vault status: {vaultStatus}", LogLevel.Debug);
+                        return vaultStatus.ToLower() != "unlocked";
+                    }
+                    else
+                    {
+                        Logger.Log($"Unexpected status response format: {content}", LogLevel.Warning);
+                        return true; // Assume locked if the response format is unexpected
+                    }
+                }
+                else
+                {
+                    Logger.Log($"Error checking vault status: {response.StatusCode}", LogLevel.Error);
+                    return true; // Assume locked if there's an error
+                }
             }
             catch (Exception ex)
             {
@@ -807,6 +831,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             if (query.ActionKeyword.ToLower() == "bw")
             {
                 Logger.Log("Executing HandleBitwardenSearch", LogLevel.Debug);
+                ResetAutoLockTimer();
                 return await HandleBitwardenSearch(query, token);
             }
 
@@ -902,6 +927,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             bool isLocked = await IsVaultLocked();
             if (isLocked)
             {
+                Logger.Log("Vault is considered locked", LogLevel.Warning);
                 return new List<Result>
                 {
                     new Result
@@ -925,6 +951,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
             }
+
+            // Ensure the server is running before performing a search
+            await EnsureServerRunning();
 
             if (string.IsNullOrWhiteSpace(query.Search))
             {
@@ -1046,6 +1075,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
+        private async Task EnsureServerRunning()
+        {
+            if (_serveProcess == null || _serveProcess.HasExited)
+            {
+                await StartBitwardenServer();
+            }
+        }
+
         private List<Result> LockVault()
         {
             _isLocked = true;
@@ -1079,7 +1116,23 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 await TryUnlock(masterPassword, QuoteMethod.Single) ||
                 await TryUnlock(masterPassword, QuoteMethod.Double))
             {
-                return true;
+                UpdateHttpClientAuthorization();
+                await StartBitwardenServer(); // Start the server immediately after unlocking
+                
+                // Wait a bit for the server to fully initialize
+                await Task.Delay(2000);
+                
+                // Check if the vault is actually unlocked
+                if (!await IsVaultLocked())
+                {
+                    Logger.Log("Vault successfully unlocked", LogLevel.Info);
+                    return true;
+                }
+                else
+                {
+                    Logger.Log("Unlock process completed, but vault is still reported as locked", LogLevel.Warning);
+                    return false;
+                }
             }
 
             Logger.Log("Failed to unlock the vault with all quoting methods", LogLevel.Error);
