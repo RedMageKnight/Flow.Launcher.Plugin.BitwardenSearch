@@ -15,6 +15,7 @@ using Newtonsoft.Json;
 using System.Security;
 using System.Runtime.InteropServices;
 using System.Net.Sockets;
+using System.Windows.Input;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -27,7 +28,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private readonly SemaphoreSlim _initializationLock = new SemaphoreSlim(1, 1);
         private readonly Dictionary<string, string> _faviconUrls = new Dictionary<string, string>();
         private string? _faviconCacheDir;
-        private Dictionary<string, Result> _currentResults = new Dictionary<string, Result>();
+        private Dictionary<string, (Result Result, BitwardenItem Item)> _currentResults = new Dictionary<string, (Result, BitwardenItem)>();
         private const int DebounceDelay = 300; // milliseconds
         private CancellationTokenSource _debounceTokenSource;
         private PluginInitContext _context = null!;
@@ -36,6 +37,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private Timer? _autoLockTimer;
         private bool _needsInitialSetup = false;
         private SecureString? _clientSecret;
+        private string _selectedItemId = string.Empty;
 
         public Main()
         {
@@ -1045,35 +1047,36 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     };
                 }
 
+                items = await SearchBitwardenAsync(query.Search, token);
+                
                 var results = new List<Result>();
+                _currentResults.Clear();
 
-                foreach (var item in items)
+                for (int index = 0; index < items.Count; index++)
                 {
-                    var mainResult = new Result
+                    var item = items[index];
+                    var resultId = item.id;
+                    Logger.Log($"Creating result for item: {item.name} with ID: {resultId} at index: {index}", LogLevel.Debug);
+                    var result = new Result
                     {
-                        Title = item.name,
+                        Title = $"{item.name} (ID: {resultId})",
                         SubTitle = BuildSubTitle(item),
-                        IcoPath = "Images/bitwarden.png", // Use default icon initially
-                        Action = context => HandleItemAction(context, item, ActionType.Default)
-                    };
-                    results.Add(mainResult);
-
-                    Logger.Log($"Processing item: {item.name}, hasTotp: {item.hasTotp}", LogLevel.Debug);
-
-                    if (item.hasTotp == true)
-                    {
-                        Logger.Log($"Adding TOTP result for item: {item.name}", LogLevel.Debug);
-                        results.Add(new Result
+                        IcoPath = "Images/bitwarden.png",
+                        ActionKeywordAssigned = resultId,
+                        Score = items.Count - index,
+                        Action = context => 
                         {
-                            Title = $"Copy TOTP for {item.name}",
-                            SubTitle = "Click to copy TOTP code",
-                            IcoPath = "Images/totp.png",
-                            Action = context => HandleItemAction(context, item, ActionType.CopyTotp)
-                        });
-                    }
+                            _selectedItemId = resultId;
+                            Logger.Log($"Action triggered for item: {item.name} with ID: {resultId}", LogLevel.Debug);
+                            return HandleItemActionWrapper(context, resultId, ActionType.Default);
+                        }
+                    };
+
+                    _currentResults[resultId] = (result, item);
+                    results.Add(result);
 
                     // Start favicon download asynchronously
-                    _ = Task.Run(() => UpdateFaviconAsync(item, mainResult));
+                    _ = Task.Run(() => UpdateFaviconAsync(item, result, resultId));
                 }
 
                 Logger.Log($"Total results generated: {results.Count}", LogLevel.Debug);
@@ -1101,6 +1104,43 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         }
                     }
                 };
+            }
+        }
+
+        private bool HandleItemActionWrapper(ActionContext context, string resultId, ActionType actionType)
+        {
+            Logger.Log($"HandleItemActionWrapper called with resultId: {resultId}", LogLevel.Debug);
+            Logger.Log($"Selected item ID: {_selectedItemId}", LogLevel.Debug);
+            Logger.Log($"Context SpecialKeyState: Ctrl={context.SpecialKeyState.CtrlPressed}, Shift={context.SpecialKeyState.ShiftPressed}, Alt={context.SpecialKeyState.AltPressed}, Win={context.SpecialKeyState.WinPressed}", LogLevel.Debug);
+            
+            if (_currentResults.TryGetValue(_selectedItemId, out var resultTuple))
+            {
+                var (result, item) = resultTuple;
+                Logger.Log($"HandleItemActionWrapper processing selected item: {item.name} with ID: {item.id}", LogLevel.Debug);
+                
+                bool isTKeyPressed = false;
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    isTKeyPressed = Keyboard.IsKeyDown(Key.T);
+                });
+                Logger.Log($"T key pressed: {isTKeyPressed}", LogLevel.Debug);
+
+                var extendedContext = new ExtendedActionContext(context, isTKeyPressed);
+
+                Task.Run(async () =>
+                {
+                    bool success = await HandleItemAction(extendedContext, item, actionType);
+                    if (!success)
+                    {
+                        _context.API.ShowMsg("Action Failed", $"Failed to perform {actionType} action for {item.name}.");
+                    }
+                });
+                return true;
+            }
+            else
+            {
+                Logger.Log($"Failed to find selected item with ID: {_selectedItemId}", LogLevel.Error);
+                return false;
             }
         }
 
@@ -1257,31 +1297,48 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             CopyTotp
         }
 
-        private bool HandleItemAction(ActionContext context, BitwardenItem item, ActionType actionType)
+        private async Task<bool> HandleItemAction(ExtendedActionContext context, BitwardenItem item, ActionType actionType)
         {
-            switch (actionType)
+            Logger.Log($"HandleItemAction called with actionType: {actionType} for item: {item.name}", LogLevel.Debug);
+            Logger.Log($"Item details - Name: {item.name}, ID: {item.id}, HasTotp: {item.hasTotp}", LogLevel.Debug);
+            
+            try
             {
-                case ActionType.CopyTotp:
-                    return CopyTotpCode(item);
-                case ActionType.Default:
-                    if (context.SpecialKeyState.CtrlPressed && context.SpecialKeyState.ShiftPressed)
+                if (context.SpecialKeyState.CtrlPressed)
+                {
+                    if (context.SpecialKeyState.ShiftPressed)
                     {
+                        Logger.Log($"Showing URI list for item: {item.name}", LogLevel.Debug);
                         return ShowUriListPopup(item);
                     }
-                    else if (context.SpecialKeyState.CtrlPressed)
+                    else if (context.IsTKeyPressed)
                     {
-                        CopyToClipboard(item.login?.username, "Username");
+                        Logger.Log($"TOTP copy triggered for item: {item.name}", LogLevel.Debug);
+                        return await CopyTotpCode(item);
                     }
                     else
                     {
-                        CopyToClipboard(item.login?.password, "Password");
+                        Logger.Log($"Copying username for item: {item.name}", LogLevel.Debug);
+                        CopyToClipboard(item.login?.username, "Username");
+                        return true;
                     }
-                    break;
+                }
+                else
+                {
+                    Logger.Log($"Copying password for item: {item.name}", LogLevel.Debug);
+                    CopyToClipboard(item.login?.password, "Password");
+                    return true;
+                }
             }
-            return true;
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error in HandleItemAction for {actionType} on item {item.name}", ex);
+                _context.API.ShowMsg("Error", $"An error occurred while performing the action for {item.name}. Check logs for details.");
+                return false;
+            }
         }
 
-        private async Task UpdateFaviconAsync(BitwardenItem item, Result result)
+        private async Task UpdateFaviconAsync(BitwardenItem item, Result result, string resultId)
         {
             if (item.login?.uris != null && item.login.uris.Any())
             {
@@ -1295,8 +1352,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     if (faviconPath != "Images/bitwarden.png")
                     {
                         result.IcoPath = faviconPath;
-                        // Instead of refreshing the result, we'll update the internal cache
-                        _currentResults[item.id] = result;
+                        // Update the existing entry in _currentResults
+                        if (_currentResults.TryGetValue(resultId, out var existingTuple))
+                        {
+                            _currentResults[resultId] = (result, existingTuple.Item);
+                        }
                     }
                 }
             }
@@ -1318,7 +1378,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             if (item.hasTotp == true)
             {
-                parts.Add("TOTP Available");
+                parts.Add("TOTP Available (Ctrl+T+Enter)");
             }
 
             return string.Join(" | ", parts);
@@ -1393,7 +1453,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log($"Sending request to: {url}", LogLevel.Debug);
                 
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                cts.CancelAfter(TimeSpan.FromSeconds(20));
+                cts.CancelAfter(TimeSpan.FromSeconds(10)); // Increase timeout to 10 seconds
 
                 var response = await _httpClient.GetAsync(url, cts.Token);
                 
@@ -1452,28 +1512,36 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
             {
-                System.Windows.Clipboard.SetText(content);
-                
-                bool shouldNotify = false;
-                switch (itemType.ToLower())
+                try
                 {
-                    case "password":
-                        shouldNotify = _settings.NotifyOnPasswordCopy;
-                        break;
-                    case "username":
-                        shouldNotify = _settings.NotifyOnUsernameCopy;
-                        break;
-                    case "uri":
-                        shouldNotify = _settings.NotifyOnUriCopy;
-                        break;
-                    case "totp code":
-                        shouldNotify = _settings.NotifyOnTotpCopy;
-                        break;
-                }
+                    System.Windows.Clipboard.SetText(content);
+                    Logger.Log($"Copied {itemType} to clipboard", LogLevel.Debug);
+                    
+                    bool shouldNotify = false;
+                    switch (itemType.ToLower())
+                    {
+                        case "password":
+                            shouldNotify = _settings.NotifyOnPasswordCopy;
+                            break;
+                        case "username":
+                            shouldNotify = _settings.NotifyOnUsernameCopy;
+                            break;
+                        case "uri":
+                            shouldNotify = _settings.NotifyOnUriCopy;
+                            break;
+                        case "totp code":
+                            shouldNotify = _settings.NotifyOnTotpCopy;
+                            break;
+                    }
 
-                if (shouldNotify)
+                    if (shouldNotify)
+                    {
+                        _context.API.ShowMsg($"{itemType} Copied", "Press Ctrl+V to paste in your previous window", string.Empty);
+                    }
+                }
+                catch (Exception ex)
                 {
-                    _context.API.ShowMsg($"{itemType} Copied", "Press Ctrl+V to paste in your previous window", string.Empty);
+                    Logger.LogError($"Failed to copy {itemType} to clipboard", ex);
                 }
             });
         }
@@ -1689,43 +1757,49 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return "Images/bitwarden.png";
         }
 
-        private bool CopyTotpCode(BitwardenItem item)
+        private async Task<bool> CopyTotpCode(BitwardenItem item)
         {
-            Task.Run(async () =>
+            Logger.Log($"Starting TOTP copy process for item: {item.name} with ID: {item.id}", LogLevel.Debug);
+            try
             {
-                try
+                var totpCode = await GetTotpCodeAsync(item.id);
+                Logger.Log($"TOTP code retrieved for item: {item.name}. Code exists: {!string.IsNullOrEmpty(totpCode)}", LogLevel.Debug);
+                if (!string.IsNullOrEmpty(totpCode))
                 {
-                    var totpCode = await GetTotpCodeAsync(item.id);
-                    if (!string.IsNullOrEmpty(totpCode))
-                    {
-                        CopyToClipboard(totpCode, "TOTP Code");
-                        Logger.Log($"TOTP code copied for item: {item.name}", LogLevel.Debug);
-                    }
-                    else
-                    {
-                        _context.API.ShowMsg("No TOTP Code", "This item does not have a TOTP code associated with it.");
-                        Logger.Log($"No TOTP code found for item: {item.name}", LogLevel.Warning);
-                    }
+                    CopyToClipboard(totpCode, "TOTP Code");
+                    Logger.Log($"TOTP code copied for item: {item.name}", LogLevel.Debug);
+                    _context.API.ShowMsg("TOTP Copied", $"TOTP code for {item.name} has been copied to clipboard.");
+                    return true;
                 }
-                catch (Exception ex)
+                else
                 {
-                    Logger.LogError("Error fetching TOTP code", ex);
-                    _context.API.ShowMsg("Error", "Failed to fetch TOTP code. Check logs for details.");
+                    Logger.Log($"No TOTP code found for item: {item.name}", LogLevel.Warning);
+                    _context.API.ShowMsg("No TOTP Code", $"Item {item.name} does not have a TOTP code associated with it.");
+                    return false;
                 }
-            });
-            return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error fetching TOTP code for item: {item.name}", ex);
+                _context.API.ShowMsg("Error", $"Failed to fetch TOTP code for {item.name}. Check logs for details.");
+                return false;
+            }
         }
 
         private async Task<string> GetTotpCodeAsync(string itemId)
         {
             var url = $"{ApiBaseUrl}/object/totp/{itemId}";
+            Logger.Log($"Fetching TOTP code for item {itemId}", LogLevel.Debug);
+            
             var response = await _httpClient.GetAsync(url);
             
             if (response.IsSuccessStatusCode)
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
                 var jObject = JObject.Parse(responseContent);
-                return jObject["data"]?["data"]?.ToString() ?? string.Empty;
+                var totpCode = jObject["data"]?["data"]?.ToString() ?? string.Empty;
+                Logger.Log($"TOTP code fetched successfully for item {itemId}", LogLevel.Debug);
+                return totpCode;
             }
             
             Logger.Log($"Failed to fetch TOTP code for item {itemId}. Status code: {response.StatusCode}", LogLevel.Error);
