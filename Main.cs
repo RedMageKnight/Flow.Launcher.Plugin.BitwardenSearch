@@ -310,8 +310,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 await loginProcess.WaitForExitAsync(cts.Token);
 
-                Logger.Log($"Login process output: {output}", LogLevel.Debug);
-                Logger.Log($"Login process error: {error}", LogLevel.Debug);
+                Logger.Log("Login process completed", LogLevel.Debug);
+                // Do not log output or error as they might contain sensitive information
 
                 if (!string.IsNullOrEmpty(error))
                 {
@@ -326,7 +326,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         _context.API.ShowMsg("Bitwarden CLI Error", "Please reinstall the Bitwarden CLI and try again.");
                         return false;
                     }
-                    Logger.Log($"Error during login: {error}", LogLevel.Error);
+                    Logger.Log("Error occurred during login", LogLevel.Error);
                     return false;
                 }
 
@@ -818,7 +818,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public async Task<List<Result>> QueryAsync(Query query, CancellationToken token)
         {
-            Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: {query.Search}", LogLevel.Debug);
+            Logger.Log($"QueryAsync called with ActionKeyword: {query.ActionKeyword}, Search: {Logger.SanitizeQuery(query.Search)}", LogLevel.Debug);
 
             if (!IsBitwardenCliInstalled())
             {
@@ -873,7 +873,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task<List<Result>> HandleBitwardenSearch(Query query, CancellationToken token)
         {
-            Logger.Log($"HandleBitwardenSearch called with query: {query.Search}", LogLevel.Debug);
+            Logger.Log($"HandleBitwardenSearch called with query: {Logger.SanitizeQuery(query.Search)}", LogLevel.Debug);
 
             if (_clientSecret == null || _clientSecret.Length == 0)
             {
@@ -1224,7 +1224,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 if (!await IsVaultLocked())
                 {
                     Logger.Log("Vault successfully unlocked", LogLevel.Info);
-                    _isFirstSearchAfterUnlock = true;  // Set the flag here
+                    _isFirstSearchAfterUnlock = true;
                     return true;
                 }
                 else
@@ -1280,12 +1280,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 await unlockProcess.WaitForExitAsync(cts.Token);
 
-                Logger.Log($"Unlock process output: {unlockOutput}", LogLevel.Debug);
-                Logger.Log($"Unlock process error: {unlockError}", LogLevel.Debug);
+                // Log completion without revealing sensitive information
+                Logger.Log($"Unlock process completed for {quoteMethod} quoting", LogLevel.Debug);
 
                 if (!string.IsNullOrEmpty(unlockError))
                 {
-                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {unlockError}", LogLevel.Error);
+                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
                     return false;
                 }
 
@@ -1313,6 +1313,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.LogError($"Exception during unlock process with {quoteMethod} quoting", ex);
                 return false;
             }
+        }
+
+        private string SanitizeErrorMessage(string errorMessage, string sensitiveData)
+        {
+            // Remove any potential password information from the error message
+            return errorMessage.Replace(sensitiveData, "[REDACTED]");
+        }
+
+        private string SanitizeExceptionMessage(Exception ex, string sensitiveData)
+        {
+            // Remove any potential password information from the exception message
+            return ex.ToString().Replace(sensitiveData, "[REDACTED]");
         }
         
         private string ExtractSessionKey(string output)
