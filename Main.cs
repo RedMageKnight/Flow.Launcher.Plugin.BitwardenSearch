@@ -1559,14 +1559,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         case "uri":
                             shouldNotify = _settings.NotifyOnUriCopy;
                             break;
-                        case "totp code":
-                            shouldNotify = _settings.NotifyOnTotpCopy;
-                            break;
                     }
 
                     if (shouldNotify)
                     {
-                        _context.API.ShowMsg($"{itemType} Copied", "Press Ctrl+V to paste in your previous window", string.Empty);
+                        _context.API.ShowMsg($"{itemType} Copied", $"{itemType} has been copied to clipboard", string.Empty);
                     }
                 }
                 catch (Exception ex)
@@ -1798,7 +1795,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     CopyToClipboard(totpCode, "TOTP Code");
                     Logger.Log($"TOTP code copied for item: {item.name}", LogLevel.Debug);
-                    _context.API.ShowMsg("TOTP Copied", $"TOTP code for {item.name} has been copied to clipboard.");
+                    
+                    // Only show notification if the setting is enabled
+                    if (_settings.NotifyOnTotpCopy)
+                    {
+                        _context.API.ShowMsg("TOTP Copied", $"TOTP code for {item.name} has been copied to clipboard.");
+                    }
                     return true;
                 }
                 else
