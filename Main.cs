@@ -1088,7 +1088,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     Logger.Log($"Creating result for item: {item.name} with ID: {resultId} at index: {index}", LogLevel.Debug);
                     var result = new Result
                     {
-                        Title = $"{item.name} (ID: {resultId})",
+                        Title = item.name, // Removed the ID from the title
                         SubTitle = BuildSubTitle(item),
                         IcoPath = "Images/bitwarden.png",
                         ActionKeywordAssigned = resultId,
