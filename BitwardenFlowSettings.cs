@@ -8,6 +8,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 {
     public class BitwardenFlowSettings : IPluginI18n
     {
+        [JsonProperty("bwExecutablePath")]
+        public string BwExecutablePath { get; set; } = string.Empty;
+
         [JsonProperty("clientId")]
         public string ClientId { get; set; } = string.Empty;
 
@@ -15,13 +18,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public string SessionKey { get; set; } = string.Empty;
 
         [JsonProperty("logTrace")]
-        public bool LogTrace { get; set; } = true;
+        public bool LogTrace { get; set; } = false;
 
         [JsonProperty("logDebug")]
-        public bool LogDebug { get; set; } = true;
+        public bool LogDebug { get; set; } = false;
 
         [JsonProperty("logInfo")]
-        public bool LogInfo { get; set; } = true;
+        public bool LogInfo { get; set; } = false;
 
         [JsonProperty("logWarning")]
         public bool LogWarning { get; set; } = true;
@@ -58,6 +61,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         [JsonProperty("clipboardClearSeconds")]
         public int ClipboardClearSeconds { get; set; } = 0; // 0 means never clear
+
+        [JsonProperty("isPathEnvironmentValid")]
+        public bool IsPathEnvironmentValid { get; set; } = false;
 
         public string GetTranslatedPluginTitle()
         {

@@ -120,6 +120,35 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
+        private bool IsBitwardenCliAccessible()
+        {
+            try
+            {
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = "--version",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                return !string.IsNullOrEmpty(output) && string.IsNullOrEmpty(error);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         public async Task InitAsync(PluginInitContext context)
         {
             _context = context;
@@ -164,6 +193,22 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log("Client Secret is not set", LogLevel.Warning);
                 _needsInitialSetup = true;
                 return false;
+            }
+
+            if (!string.IsNullOrEmpty(_settings.BwExecutablePath))
+            {
+                var directoryPath = Path.GetDirectoryName(_settings.BwExecutablePath);
+                if (!string.IsNullOrEmpty(directoryPath))
+                {
+                    var currentPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.Process) ?? string.Empty;
+                    Environment.SetEnvironmentVariable("PATH", currentPath + Path.PathSeparator + directoryPath, EnvironmentVariableTarget.Process);
+                }
+            }
+
+            if (!IsBitwardenCliAccessible())
+            {
+                Logger.Log("Bitwarden CLI is not accessible. Please check the PATH or the executable location in settings.", LogLevel.Warning);
+                _needsInitialSetup = true;
             }
 
             _needsInitialSetup = false;

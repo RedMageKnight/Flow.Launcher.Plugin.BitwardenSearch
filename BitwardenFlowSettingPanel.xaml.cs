@@ -8,6 +8,9 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using Microsoft.Win32;
+using System.IO;
+using System.Linq;
 using Flow.Launcher.Plugin.BitwardenSearch;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
@@ -29,6 +32,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             InitializeComponent();
             _settings = settings;
             _updateSettings = updateSettings;
+            
+            BwExecutablePathTextBox.Text = _settings.BwExecutablePath;
+            UpdatePathStatus();
             
             ClientIdTextBox.Text = _settings.ClientId;
             
@@ -70,6 +76,118 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             // Initialize the clipboard clear combo box
             ClipboardClearComboBox.SelectedIndex = GetIndexFromSeconds(_settings.ClipboardClearSeconds);
+        }
+
+        private void BrowseButton_Click(object sender, RoutedEventArgs e)
+        {
+            var openFileDialog = new OpenFileDialog
+            {
+                Filter = "Executable files (*.exe)|*.exe",
+                Title = "Select Bitwarden CLI executable"
+            };
+
+            if (openFileDialog.ShowDialog() == true && _settings != null)
+            {
+                _settings.BwExecutablePath = openFileDialog.FileName;
+                BwExecutablePathTextBox.Text = _settings.BwExecutablePath;
+                _updateSettings?.Invoke(_settings);
+                UpdatePathStatus();
+            }
+        }
+
+        private void UpdatePathStatus()
+        {
+            if (_settings == null)
+            {
+                PathStatusTextBlock.Text = "Settings not initialized.";
+                PathStatusTextBlock.Foreground = Brushes.Red;
+                return;
+            }
+
+            if (string.IsNullOrEmpty(_settings.BwExecutablePath))
+            {
+                PathStatusTextBlock.Text = "Please select the Bitwarden CLI executable.";
+                PathStatusTextBlock.Foreground = Brushes.Gray;
+                return;
+            }
+
+            if (!File.Exists(_settings.BwExecutablePath))
+            {
+                PathStatusTextBlock.Text = "The specified file does not exist.";
+                PathStatusTextBlock.Foreground = Brushes.Red;
+                return;
+            }
+
+            var directoryPath = Path.GetDirectoryName(_settings.BwExecutablePath);
+            if (string.IsNullOrEmpty(directoryPath))
+            {
+                PathStatusTextBlock.Text = "Invalid file path.";
+                PathStatusTextBlock.Foreground = Brushes.Red;
+                return;
+            }
+
+            bool isInUserPath = IsPathInEnvironmentVariable(directoryPath, EnvironmentVariableTarget.User);
+            bool isInSystemPath = IsPathInEnvironmentVariable(directoryPath, EnvironmentVariableTarget.Machine);
+
+            if (isInUserPath || isInSystemPath)
+            {
+                PathStatusTextBlock.Text = $"Bitwarden CLI path is correctly set in the {(isInUserPath ? "User" : "System")} PATH environment variable.";
+                PathStatusTextBlock.Foreground = Brushes.Green;
+                _settings.IsPathEnvironmentValid = true;
+            }
+            else
+            {
+                PathStatusTextBlock.Text = "Bitwarden CLI path is not in the PATH environment variable. Click to add to User PATH.";
+                PathStatusTextBlock.Foreground = Brushes.Orange;
+                PathStatusTextBlock.Cursor = Cursors.Hand;
+                PathStatusTextBlock.MouseDown += PathStatusTextBlock_MouseDown;
+                _settings.IsPathEnvironmentValid = false;
+            }
+
+            _updateSettings?.Invoke(_settings);
+        }
+
+        private bool IsPathInEnvironmentVariable(string path, EnvironmentVariableTarget target)
+        {
+            var pathEnv = Environment.GetEnvironmentVariable("PATH", target);
+            if (string.IsNullOrEmpty(pathEnv)) return false;
+
+            var paths = pathEnv.Split(Path.PathSeparator);
+            return paths.Contains(path, StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void PathStatusTextBlock_MouseDown(object sender, MouseButtonEventArgs e)
+        {
+            if (_settings != null && !_settings.IsPathEnvironmentValid)
+            {
+                AddToPath();
+            }
+        }
+
+        private void AddToPath()
+        {
+            if (_settings == null) return;
+
+            var directoryPath = Path.GetDirectoryName(_settings.BwExecutablePath);
+            if (string.IsNullOrEmpty(directoryPath))
+            {
+                MessageBox.Show("Invalid file path.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            try
+            {
+                var pathEnv = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? string.Empty;
+                var newPath = pathEnv + Path.PathSeparator + directoryPath;
+                Environment.SetEnvironmentVariable("PATH", newPath, EnvironmentVariableTarget.User);
+
+                MessageBox.Show("Bitwarden CLI path has been added to the User PATH environment variable.", "Success", MessageBoxButton.OK, MessageBoxImage.Information);
+                UpdatePathStatus();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to update PATH environment variable: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         private void LogLevelCheckBox_Changed(object sender, RoutedEventArgs e)
