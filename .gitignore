@@ -60,3 +60,6 @@ artifacts/
 # except build/, which is used as an MSBuild target.
 !**/[Pp]ackages/build/
 .aider*
+
+# PowerShell testing files.
+*.ps1
