@@ -79,26 +79,23 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _throttler = new SemaphoreSlim(MaxConcurrentDownloads);
         }
 
-        public async Task CacheAllIconsAsync(List<BitwardenItem> items)
+        public async Task CacheAllIconsAsync(List<BitwardenItem> items, IProgress<int>? progress = null)
         {
-            Logger.Log("Starting to cache icons", LogLevel.Info);
+            Logger.Log($"Starting to cache icons for {items.Count} items", LogLevel.Info);
             try
             {
-                // Sort items alphabetically by name
-                items = items.OrderBy(item => item.name).ToList();
-
                 var tasks = new List<Task>();
+                var processedCount = 0;
 
-                for (int i = 0; i < Math.Min(items.Count, InitialCacheLimit); i++)
+                foreach (var item in items)
                 {
-                    var item = items[i];
                     if (item?.login?.uris != null && item.login.uris.Any())
                     {
                         var webUri = item.login.uris
                             .Select(u => u.uri)
                             .FirstOrDefault(u => u.StartsWith("http://") || u.StartsWith("https://"));
 
-                        if (!string.IsNullOrEmpty(webUri) && _iconStatusCache.ShouldCheckIcon(webUri))
+                        if (!string.IsNullOrEmpty(webUri))
                         {
                             await _throttler.WaitAsync();
                             tasks.Add(Task.Run(async () =>
@@ -107,10 +104,16 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                                 {
                                     var success = await DownloadAndCacheFaviconAsync(webUri, CancellationToken.None);
                                     _iconStatusCache.UpdateIconStatus(webUri, success);
+                                    Logger.Log($"Cached icon for {webUri}: {(success ? "Success" : "Failed")}", LogLevel.Debug);
                                 }
                                 finally
                                 {
                                     _throttler.Release();
+                                    var completed = Interlocked.Increment(ref processedCount);
+                                    if (completed % 10 == 0 || completed == items.Count) // Report every 10 items or at completion
+                                    {
+                                        progress?.Report((int)((float)completed / items.Count * 100));
+                                    }
                                 }
                             }));
                         }
@@ -120,38 +123,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 await Task.WhenAll(tasks);
                 _iconStatusCache.SaveCache();
 
-                // Cache the rest of the icons in the background
-                _ = Task.Run(async () =>
-                {
-                    for (int i = InitialCacheLimit; i < items.Count; i++)
-                    {
-                        var item = items[i];
-                        if (item?.login?.uris != null && item.login.uris.Any())
-                        {
-                            var webUri = item.login.uris
-                                .Select(u => u.uri)
-                                .FirstOrDefault(u => u.StartsWith("http://") || u.StartsWith("https://"));
-
-                            if (!string.IsNullOrEmpty(webUri) && _iconStatusCache.ShouldCheckIcon(webUri))
-                            {
-                                await _throttler.WaitAsync();
-                                try
-                                {
-                                    var success = await DownloadAndCacheFaviconAsync(webUri, CancellationToken.None);
-                                    _iconStatusCache.UpdateIconStatus(webUri, success);
-                                }
-                                finally
-                                {
-                                    _throttler.Release();
-                                }
-                            }
-                        }
-                    }
-                    _iconStatusCache.SaveCache();
-                    Logger.Log("Background icon caching completed", LogLevel.Info);
-                });
-
-                Logger.Log($"Initial icon caching completed. Cached {Math.Min(items.Count, InitialCacheLimit)} icons.", LogLevel.Info);
+                Logger.Log($"Icon caching completed. Processed {processedCount} icons.", LogLevel.Info);
             }
             catch (Exception ex)
             {
@@ -159,7 +131,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        public async Task<bool> DownloadAndCacheFaviconAsync(string url, CancellationToken token)
+        private async Task<bool> DownloadAndCacheFaviconAsync(string url, CancellationToken token)
         {
             var uri = new Uri(url);
             var domain = uri.Host;
@@ -177,10 +149,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             try
             {
                 using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                cts.CancelAfter(TimeSpan.FromSeconds(5));
+                cts.CancelAfter(TimeSpan.FromSeconds(10));
 
                 var faviconUrl = $"https://www.google.com/s2/favicons?domain={domain}&sz=32";
-                Logger.Log($"Downloading favicon for {domain}", LogLevel.Debug);
+                Logger.Log($"Downloading favicon for {domain} from {faviconUrl}", LogLevel.Debug);
 
                 using var response = await _httpClient.GetAsync(faviconUrl, cts.Token);
                 if (response.IsSuccessStatusCode)
@@ -193,13 +165,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 else
                 {
-                    Logger.Log($"Failed to download favicon for {domain}: {response.StatusCode}", LogLevel.Info);
+                    Logger.Log($"Failed to download favicon for {domain}: {response.StatusCode}", LogLevel.Warning);
                     return false;
                 }
             }
             catch (Exception ex)
             {
-                Logger.Log($"Error downloading favicon for {domain}: {ex.Message}", LogLevel.Info);
+                Logger.Log($"Error downloading favicon for {domain}: {ex.Message}", LogLevel.Warning);
                 return false;
             }
         }

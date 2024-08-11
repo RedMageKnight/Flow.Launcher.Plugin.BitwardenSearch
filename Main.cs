@@ -1000,6 +1000,27 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     };
                 }
             }
+            else if (query.FirstSearch?.ToLower() == "/sync")
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Sync Bitwarden Vault and Icons",
+                        SubTitle = "Synchronize your vault and cache icons for all items",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            Task.Run(async () =>
+                            {
+                                await SyncVaultAndIcons();
+                                _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
+                            });
+                            return true;
+                        }
+                    }
+                };
+            }
 
             bool isLocked = await IsVaultLocked();
             if (isLocked)
@@ -1061,6 +1082,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         Action = _ => 
                         {
                             _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /unlock ");
+                            return false;
+                        }
+                    },
+                    new Result
+                    {
+                        Title = "/sync",
+                        SubTitle = "Synchronize your vault and cache icons",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /sync");
                             return false;
                         }
                     }
@@ -1151,6 +1183,80 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
+        private async Task SyncVaultAndIcons()
+        {
+            try
+            {
+                _context.API.ShowMsg("Sync Started", "Beginning full sync of vault and icons. This may take a while.");
+
+                // Step 1: Sync the vault
+                Logger.Log("Starting vault synchronization", LogLevel.Info);
+                var syncResponse = await _httpClient.PostAsync($"{ApiBaseUrl}/sync", null);
+                
+                if (!syncResponse.IsSuccessStatusCode)
+                {
+                    Logger.Log($"Failed to synchronize vault. Status code: {syncResponse.StatusCode}", LogLevel.Error);
+                    _context.API.ShowMsg("Sync Failed", "Failed to synchronize your vault. Please try again later.");
+                    return;
+                }
+
+                Logger.Log("Vault synchronization completed successfully", LogLevel.Info);
+
+                // Step 2: Fetch all items
+                var itemsResponse = await _httpClient.GetAsync($"{ApiBaseUrl}/list/object/items");
+                
+                if (!itemsResponse.IsSuccessStatusCode)
+                {
+                    Logger.Log($"Failed to retrieve items after sync. Status code: {itemsResponse.StatusCode}", LogLevel.Error);
+                    _context.API.ShowMsg("Icon Sync Failed", "Vault synced successfully, but failed to retrieve items for icon caching.");
+                    return;
+                }
+
+                var responseContent = await itemsResponse.Content.ReadAsStringAsync();
+                var jObject = JObject.Parse(responseContent);
+                var dataArray = jObject["data"]?["data"] as JArray;
+
+                if (dataArray == null)
+                {
+                    Logger.Log("No data array found in response for icon syncing", LogLevel.Warning);
+                    _context.API.ShowMsg("Icon Sync Failed", "Vault synced successfully, but no items found for icon caching.");
+                    return;
+                }
+
+                var items = dataArray
+                    .Select(item => item.ToObject<BitwardenItem>())
+                    .Where(item => item != null)
+                    .Cast<BitwardenItem>()
+                    .ToList();
+
+                // Step 3: Cache icons
+                if (_iconCacheManager != null)
+                {
+                    var progress = new Progress<int>(percent =>
+                    {
+                        Logger.Log($"Icon caching progress: {percent}%", LogLevel.Debug);
+                    });
+
+                    _context.API.ShowMsg("Sync In Progress", "Caching icons. This may take a few minutes.");
+
+                    await _iconCacheManager.CacheAllIconsAsync(items, progress);
+                    
+                    Logger.Log("Icon caching completed successfully", LogLevel.Info);
+                    _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
+                }
+                else
+                {
+                    Logger.Log("IconCacheManager is not initialized", LogLevel.Warning);
+                    _context.API.ShowMsg("Icon Sync Incomplete", "Vault synced successfully, but icon caching could not be performed.");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error during vault and icon synchronization", ex);
+                _context.API.ShowMsg("Sync Error", "An error occurred during synchronization. Please check the logs for details.");
+            }
+        }
+        
         private bool HandleItemActionWrapper(ActionContext context, string resultId, ActionType actionType)
         {
             Logger.Log($"HandleItemActionWrapper called with resultId: {resultId}", LogLevel.Debug);
@@ -1240,8 +1346,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     Logger.Log("Vault successfully unlocked", LogLevel.Info);
                     
-                    // Cache all icons after successful unlock
-                    await CacheAllIconsAsync();
+                    // Sync vault and cache icons after successful unlock
+                    await SyncVaultAndIcons();
                     
                     return true;
                 }
