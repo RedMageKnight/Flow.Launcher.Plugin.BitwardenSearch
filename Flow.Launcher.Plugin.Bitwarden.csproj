@@ -57,7 +57,7 @@
     </Compile>
   </ItemGroup>
 
-  <Target Name="PreBuild" BeforeTargets="PreBuildEvent">
+  <Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(CI)' != 'true'">
     <Exec Command="powershell.exe -ExecutionPolicy Bypass -Command &quot;&amp; {Start-Process PowerShell.exe -ArgumentList '-ExecutionPolicy Bypass -File \&quot;$(ProjectDir)pre-build-cleanup.ps1\&quot;' -Verb RunAs -Wait}&quot;" />
   </Target>
 
@@ -86,7 +86,7 @@
     <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(FlowLauncherPluginsDirectory)$(PluginOutputDirectory)\%(RecursiveDir)" />
   </Target>
 
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent">
+  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(CI)' != 'true'">
     <Exec Command="type C:\Temp\pre-build-cleanup.log" />
   </Target>
 </Project>
