@@ -52,6 +52,20 @@
             <CheckBox x:Name="LogErrorCheckBox" Content="Error" Margin="0,5,0,0" Checked="LogLevelCheckBox_Changed" Unchecked="LogLevelCheckBox_Changed"/>
         </StackPanel>
 
+        <TextBlock Text="Clipboard Clear Settings:" FontWeight="Bold" Margin="0,20,0,5"/>
+        <StackPanel Orientation="Horizontal" Margin="10,5,0,0">
+            <TextBlock Text="Clear clipboard after: " VerticalAlignment="Center"/>
+            <ComboBox x:Name="ClipboardClearComboBox" Width="150" SelectionChanged="ClipboardClearComboBox_SelectionChanged">
+                <ComboBoxItem Content="Never" Tag="0"/>
+                <ComboBoxItem Content="10 seconds" Tag="10"/>
+                <ComboBoxItem Content="20 seconds" Tag="20"/>
+                <ComboBoxItem Content="30 seconds" Tag="30"/>
+                <ComboBoxItem Content="1 minute" Tag="60"/>
+                <ComboBoxItem Content="2 minutes" Tag="120"/>
+                <ComboBoxItem Content="5 minutes" Tag="300"/>
+            </ComboBox>
+        </StackPanel>
+
         <TextBlock Text="Auto-Lock Settings:" FontWeight="Bold" Margin="0,20,0,5"/>
         <CheckBox x:Name="KeepUnlockedCheckBox" Content="Keep Vault Unlocked Indefinitely" Margin="10,5,0,0" 
                   Checked="KeepUnlockedCheckBox_Changed" Unchecked="KeepUnlockedCheckBox_Changed"/>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Threading;
+using System.Windows.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -39,6 +40,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private SecureString? _clientSecret;
         private string _selectedItemId = string.Empty;
         private IconCacheManager? _iconCacheManager;
+        private DispatcherTimer? _clipboardClearTimer;
 
         public Main()
         {
@@ -1700,12 +1702,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         case "uri":
                             shouldNotify = _settings.NotifyOnUriCopy;
                             break;
+                        case "totp":
+                            shouldNotify = _settings.NotifyOnTotpCopy;
+                            break;
                     }
 
                     if (shouldNotify)
                     {
                         _context.API.ShowMsg($"{itemType} Copied", $"{itemType} has been copied to clipboard", string.Empty);
                     }
+
+                    SetupClipboardClearTimer();
                 }
                 catch (Exception ex)
                 {
@@ -1850,6 +1857,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _initializationLock.Dispose();
                 _autoLockTimer?.Dispose();
                 _iconCacheThrottler.Dispose();
+                if (_clipboardClearTimer != null)
+                {
+                    _clipboardClearTimer.Stop();
+                    _clipboardClearTimer = null;
+                }
                 if (_clientSecret != null)
                 {
                     _clientSecret.Dispose();
@@ -1980,6 +1992,47 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             
             Logger.Log($"Failed to fetch TOTP code for item {itemId}. Status code: {response.StatusCode}", LogLevel.Error);
             return string.Empty;
+        }
+
+        private void SetupClipboardClearTimer()
+        {
+            if (_clipboardClearTimer != null)
+            {
+                _clipboardClearTimer.Stop();
+                _clipboardClearTimer = null;
+            }
+
+            if (_settings.ClipboardClearSeconds > 0)
+            {
+                _clipboardClearTimer = new DispatcherTimer
+                {
+                    Interval = TimeSpan.FromSeconds(_settings.ClipboardClearSeconds)
+                };
+                _clipboardClearTimer.Tick += ClearClipboard;
+                _clipboardClearTimer.Start();
+            }
+        }
+
+        private void ClearClipboard(object? sender, EventArgs e)
+        {
+            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    System.Windows.Clipboard.Clear();
+                    Logger.Log("Clipboard cleared", LogLevel.Debug);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError("Failed to clear clipboard", ex);
+                }
+            });
+
+            if (_clipboardClearTimer != null)
+            {
+                _clipboardClearTimer.Stop();
+                _clipboardClearTimer = null;
+            }
         }
 
         ~Main()

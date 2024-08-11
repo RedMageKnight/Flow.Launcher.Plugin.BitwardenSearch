@@ -67,6 +67,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             // Add event handlers for the new functionality
             ClientSecretBox.PasswordChanged += ClientSecretBox_PasswordChanged;
             SaveClientSecretButton.Click += SaveClientSecretButton_Click;
+
+            // Initialize the clipboard clear combo box
+            ClipboardClearComboBox.SelectedIndex = GetIndexFromSeconds(_settings.ClipboardClearSeconds);
         }
 
         private void LogLevelCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -237,6 +240,34 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 VerificationStatusTextBlock.Foreground = Brushes.Gray;
             }
+        }
+
+        private void ClipboardClearComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_settings != null && sender is ComboBox comboBox)
+            {
+                var selectedItem = comboBox.SelectedItem as ComboBoxItem;
+                if (selectedItem != null && int.TryParse(selectedItem.Tag.ToString(), out int seconds))
+                {
+                    _settings.ClipboardClearSeconds = seconds;
+                    _updateSettings?.Invoke(_settings);
+                }
+            }
+        }
+
+        private int GetIndexFromSeconds(int seconds)
+        {
+            return seconds switch
+            {
+                0 => 0,
+                10 => 1,
+                20 => 2,
+                30 => 3,
+                60 => 4,
+                120 => 5,
+                300 => 6,
+                _ => 0
+            };
         }
     }
 }

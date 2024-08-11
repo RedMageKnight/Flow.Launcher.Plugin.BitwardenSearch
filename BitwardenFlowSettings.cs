@@ -56,6 +56,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("notifyOnSyncComplete")]
         public bool NotifyOnSyncComplete { get; set; } = true;
 
+        [JsonProperty("clipboardClearSeconds")]
+        public int ClipboardClearSeconds { get; set; } = 0; // 0 means never clear
+
         public string GetTranslatedPluginTitle()
         {
             return "Bitwarden Vault";
