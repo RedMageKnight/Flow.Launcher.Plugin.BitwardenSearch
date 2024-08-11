@@ -38,6 +38,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private bool _needsInitialSetup = false;
         private SecureString? _clientSecret;
         private string _selectedItemId = string.Empty;
+        private IconCacheManager? _iconCacheManager;
 
         public Main()
         {
@@ -58,6 +59,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 try
                 {
                     Directory.CreateDirectory(_faviconCacheDir);
+                    _iconCacheManager = new IconCacheManager(_faviconCacheDir, _httpClient);
                     Logger.Log($"Favicon cache directory created: {_faviconCacheDir}", LogLevel.Info);
                 }
                 catch (Exception ex)
@@ -551,7 +553,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private async Task CacheAllIconsAsync()
         {
-            Logger.Log("Starting to cache all icons", LogLevel.Info);
             try
             {
                 var url = $"{ApiBaseUrl}/list/object/items";
@@ -573,50 +574,20 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return;
                 }
 
-                var cacheTasksCount = 0;
-                var maxConcurrentTasks = 5; // Adjust this value based on performance testing
-                var throttler = new SemaphoreSlim(maxConcurrentTasks);
+                var items = dataArray
+                    .Select(item => item.ToObject<BitwardenItem>())
+                    .Where(item => item != null)
+                    .Cast<BitwardenItem>()  // This cast removes the nullability
+                    .ToList();
 
-                var cacheTasks = new List<Task>();
-
-                foreach (var item in dataArray)
+                if (_iconCacheManager != null)
                 {
-                    var bitwardenItem = item.ToObject<BitwardenItem>();
-                    if (bitwardenItem?.login?.uris != null && bitwardenItem.login.uris.Any())
-                    {
-                        var webUri = bitwardenItem.login.uris
-                            .Select(u => u.uri)
-                            .FirstOrDefault(u => u.StartsWith("http://") || u.StartsWith("https://"));
-
-                        if (!string.IsNullOrEmpty(webUri))
-                        {
-                            await throttler.WaitAsync();
-                            cacheTasksCount++;
-
-                            var cacheTask = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    await DownloadAndCacheFaviconAsync(webUri, CancellationToken.None);
-                                }
-                                finally
-                                {
-                                    throttler.Release();
-                                }
-                            });
-
-                            cacheTasks.Add(cacheTask);
-
-                            if (cacheTasksCount % 100 == 0)
-                            {
-                                Logger.Log($"Caching in progress: {cacheTasksCount} icons processed", LogLevel.Debug);
-                            }
-                        }
-                    }
+                    await _iconCacheManager.CacheAllIconsAsync(items);
                 }
-
-                await Task.WhenAll(cacheTasks);
-                Logger.Log($"Icon caching completed. Total icons cached: {cacheTasksCount}", LogLevel.Info);
+                else
+                {
+                    Logger.Log("IconCacheManager is not initialized", LogLevel.Warning);
+                }
             }
             catch (Exception ex)
             {
@@ -1429,13 +1400,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private void UpdateFaviconAsync(BitwardenItem item, Result result, string resultId)
         {
-            if (string.IsNullOrEmpty(_faviconCacheDir))
-            {
-                Logger.Log("Favicon cache directory is not set.", LogLevel.Warning);
-                return;
-            }
-
-            if (item.login?.uris != null && item.login.uris.Any())
+            if (_iconCacheManager != null && item.login?.uris != null && item.login.uris.Any())
             {
                 var webUri = item.login.uris
                     .Select(u => u.uri)
@@ -1443,19 +1408,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 if (!string.IsNullOrEmpty(webUri))
                 {
-                    var uri = new Uri(webUri);
-                    var domain = uri.Host;
-                    var safeFileName = string.Join("_", domain.Split(Path.GetInvalidFileNameChars()));
-                    var filePath = Path.Combine(_faviconCacheDir, $"{safeFileName}.ico");
-
-                    if (File.Exists(filePath))
+                    result.IcoPath = _iconCacheManager.GetCachedIconPath(webUri);
+                    // Update the existing entry in _currentResults
+                    if (_currentResults.TryGetValue(resultId, out var existingTuple))
                     {
-                        result.IcoPath = filePath;
-                        // Update the existing entry in _currentResults
-                        if (_currentResults.TryGetValue(resultId, out var existingTuple))
-                        {
-                            _currentResults[resultId] = (result, existingTuple.Item);
-                        }
+                        _currentResults[resultId] = (result, existingTuple.Item);
                     }
                 }
             }
