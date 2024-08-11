@@ -47,6 +47,15 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("notifyOnTotpCopy")]
         public bool NotifyOnTotpCopy { get; set; } = true;
 
+        [JsonProperty("notifyOnSyncStart")]
+        public bool NotifyOnSyncStart { get; set; } = true;
+
+        [JsonProperty("notifyOnIconCacheStart")]
+        public bool NotifyOnIconCacheStart { get; set; } = true;
+
+        [JsonProperty("notifyOnSyncComplete")]
+        public bool NotifyOnSyncComplete { get; set; } = true;
+
         public string GetTranslatedPluginTitle()
         {
             return "Bitwarden Vault";

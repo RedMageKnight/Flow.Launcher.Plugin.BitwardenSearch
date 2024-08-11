@@ -51,6 +51,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             LogInfoCheckBox.IsChecked = _settings.LogInfo;
             LogWarningCheckBox.IsChecked = _settings.LogWarning;
             LogErrorCheckBox.IsChecked = _settings.LogError;
+            NotifySyncStartCheckBox.IsChecked = _settings.NotifyOnSyncStart;
+            NotifyIconCacheStartCheckBox.IsChecked = _settings.NotifyOnIconCacheStart;
+            NotifySyncCompleteCheckBox.IsChecked = _settings.NotifyOnSyncComplete;
 
             KeepUnlockedCheckBox.IsChecked = _settings.KeepUnlocked;
             LockTimeTextBox.Text = _settings.LockTime.ToString();
@@ -86,6 +89,26 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         break;
                     case "Error":
                         _settings.LogError = checkBox.IsChecked ?? false;
+                        break;
+                }
+                _updateSettings?.Invoke(_settings);
+            }
+        }
+
+        private void SyncNotificationCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings != null && sender is CheckBox checkBox)
+            {
+                switch (checkBox.Name)
+                {
+                    case "NotifySyncStartCheckBox":
+                        _settings.NotifyOnSyncStart = checkBox.IsChecked ?? false;
+                        break;
+                    case "NotifyIconCacheStartCheckBox":
+                        _settings.NotifyOnIconCacheStart = checkBox.IsChecked ?? false;
+                        break;
+                    case "NotifySyncCompleteCheckBox":
+                        _settings.NotifyOnSyncComplete = checkBox.IsChecked ?? false;
                         break;
                 }
                 _updateSettings?.Invoke(_settings);

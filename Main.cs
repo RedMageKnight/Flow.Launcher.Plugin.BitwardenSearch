@@ -1187,7 +1187,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             try
             {
-                _context.API.ShowMsg("Sync Started", "Beginning full sync of vault and icons. This may take a while.");
+                if (_settings.NotifyOnSyncStart)
+                {
+                    _context.API.ShowMsg("Sync Started", "Beginning full sync of vault and icons. This may take a while.");
+                }
 
                 // Step 1: Sync the vault
                 Logger.Log("Starting vault synchronization", LogLevel.Info);
@@ -1237,12 +1240,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         Logger.Log($"Icon caching progress: {percent}%", LogLevel.Debug);
                     });
 
-                    _context.API.ShowMsg("Sync In Progress", "Caching icons. This may take a few minutes.");
+                    if (_settings.NotifyOnIconCacheStart)
+                    {
+                        _context.API.ShowMsg("Sync In Progress", "Caching icons. This may take a few minutes.");
+                    }
 
                     await _iconCacheManager.CacheAllIconsAsync(items, progress);
                     
                     Logger.Log("Icon caching completed successfully", LogLevel.Info);
-                    _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
+                    if (_settings.NotifyOnSyncComplete)
+                    {
+                        _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
+                    }
                 }
                 else
                 {
