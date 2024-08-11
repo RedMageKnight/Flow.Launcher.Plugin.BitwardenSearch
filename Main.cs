@@ -38,7 +38,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private bool _needsInitialSetup = false;
         private SecureString? _clientSecret;
         private string _selectedItemId = string.Empty;
-        private bool _isFirstSearchAfterUnlock = true;
 
         public Main()
         {
@@ -550,6 +549,81 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
+        private async Task CacheAllIconsAsync()
+        {
+            Logger.Log("Starting to cache all icons", LogLevel.Info);
+            try
+            {
+                var url = $"{ApiBaseUrl}/list/object/items";
+                var response = await _httpClient.GetAsync(url);
+                
+                if (!response.IsSuccessStatusCode)
+                {
+                    Logger.Log($"Failed to retrieve items for icon caching. Status code: {response.StatusCode}", LogLevel.Error);
+                    return;
+                }
+
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var jObject = JObject.Parse(responseContent);
+                var dataArray = jObject["data"]?["data"] as JArray;
+
+                if (dataArray == null)
+                {
+                    Logger.Log("No data array found in response for icon caching", LogLevel.Warning);
+                    return;
+                }
+
+                var cacheTasksCount = 0;
+                var maxConcurrentTasks = 5; // Adjust this value based on performance testing
+                var throttler = new SemaphoreSlim(maxConcurrentTasks);
+
+                var cacheTasks = new List<Task>();
+
+                foreach (var item in dataArray)
+                {
+                    var bitwardenItem = item.ToObject<BitwardenItem>();
+                    if (bitwardenItem?.login?.uris != null && bitwardenItem.login.uris.Any())
+                    {
+                        var webUri = bitwardenItem.login.uris
+                            .Select(u => u.uri)
+                            .FirstOrDefault(u => u.StartsWith("http://") || u.StartsWith("https://"));
+
+                        if (!string.IsNullOrEmpty(webUri))
+                        {
+                            await throttler.WaitAsync();
+                            cacheTasksCount++;
+
+                            var cacheTask = Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    await DownloadAndCacheFaviconAsync(webUri, CancellationToken.None);
+                                }
+                                finally
+                                {
+                                    throttler.Release();
+                                }
+                            });
+
+                            cacheTasks.Add(cacheTask);
+
+                            if (cacheTasksCount % 100 == 0)
+                            {
+                                Logger.Log($"Caching in progress: {cacheTasksCount} icons processed", LogLevel.Debug);
+                            }
+                        }
+                    }
+                }
+
+                await Task.WhenAll(cacheTasks);
+                Logger.Log($"Icon caching completed. Total icons cached: {cacheTasksCount}", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error during icon caching", ex);
+            }
+        }
+
         private async Task<bool> IsSessionValid()
         {
             try
@@ -1022,34 +1096,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 };
             }
 
-            // New functionality: Copy search, clear, and paste after unlock
-            if (_isFirstSearchAfterUnlock)
-            {
-                _isFirstSearchAfterUnlock = false;
-                string originalSearch = query.Search;
-
-                // Copy the search to clipboard
-                CopyToClipboard(originalSearch, "Search");
-
-                // Clear the search string
-                _context.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword + " ");
-
-                // Paste the previous search
-                await Task.Delay(100); // Short delay to ensure the query is cleared
-                _context.API.ChangeQuery(_context.CurrentPluginMetadata.ActionKeyword + " " + originalSearch);
-
-                // Allow the pasted query to be processed
-                return new List<Result>
-                {
-                    new Result
-                    {
-                        Title = "Processing your search...",
-                        SubTitle = "Please wait a moment",
-                        IcoPath = "Images/bitwarden.png"
-                    }
-                };
-            }
-
             // Cancel any previous debounce task
             _debounceTokenSource.Cancel();
             _debounceTokenSource = new CancellationTokenSource();
@@ -1076,8 +1122,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     };
                 }
 
-                items = await SearchBitwardenAsync(query.Search, token);
-                
                 var results = new List<Result>();
                 _currentResults.Clear();
 
@@ -1088,7 +1132,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     Logger.Log($"Creating result for item: {item.name} with ID: {resultId} at index: {index}", LogLevel.Debug);
                     var result = new Result
                     {
-                        Title = item.name, // Removed the ID from the title
+                        Title = item.name,
                         SubTitle = BuildSubTitle(item),
                         IcoPath = "Images/bitwarden.png",
                         ActionKeywordAssigned = resultId,
@@ -1104,8 +1148,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     _currentResults[resultId] = (result, item);
                     results.Add(result);
 
-                    // Start favicon download asynchronously
-                    _ = Task.Run(() => UpdateFaviconAsync(item, result, resultId));
+                    // Use cached favicon
+                    UpdateFaviconAsync(item, result, resultId);
                 }
 
                 Logger.Log($"Total results generated: {results.Count}", LogLevel.Debug);
@@ -1224,7 +1268,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 if (!await IsVaultLocked())
                 {
                     Logger.Log("Vault successfully unlocked", LogLevel.Info);
-                    _isFirstSearchAfterUnlock = true;
+                    
+                    // Cache all icons after successful unlock
+                    await CacheAllIconsAsync();
+                    
                     return true;
                 }
                 else
@@ -1380,8 +1427,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private async Task UpdateFaviconAsync(BitwardenItem item, Result result, string resultId)
+        private void UpdateFaviconAsync(BitwardenItem item, Result result, string resultId)
         {
+            if (string.IsNullOrEmpty(_faviconCacheDir))
+            {
+                Logger.Log("Favicon cache directory is not set.", LogLevel.Warning);
+                return;
+            }
+
             if (item.login?.uris != null && item.login.uris.Any())
             {
                 var webUri = item.login.uris
@@ -1390,10 +1443,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 if (!string.IsNullOrEmpty(webUri))
                 {
-                    var faviconPath = await DownloadAndCacheFaviconAsync(webUri, CancellationToken.None);
-                    if (faviconPath != "Images/bitwarden.png")
+                    var uri = new Uri(webUri);
+                    var domain = uri.Host;
+                    var safeFileName = string.Join("_", domain.Split(Path.GetInvalidFileNameChars()));
+                    var filePath = Path.Combine(_faviconCacheDir, $"{safeFileName}.ico");
+
+                    if (File.Exists(filePath))
                     {
-                        result.IcoPath = faviconPath;
+                        result.IcoPath = filePath;
                         // Update the existing entry in _currentResults
                         if (_currentResults.TryGetValue(resultId, out var existingTuple))
                         {
@@ -1688,6 +1745,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             GC.SuppressFinalize(this);
         }
 
+        private SemaphoreSlim _iconCacheThrottler = new SemaphoreSlim(5);
+        
         protected virtual void Dispose(bool disposing)
         {
             if (disposing)
@@ -1718,6 +1777,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 _initializationLock.Dispose();
                 _autoLockTimer?.Dispose();
+                _iconCacheThrottler.Dispose();
                 if (_clientSecret != null)
                 {
                     _clientSecret.Dispose();
