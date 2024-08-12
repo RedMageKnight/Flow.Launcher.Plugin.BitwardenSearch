@@ -32,11 +32,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("logError")]
         public bool LogError { get; set; } = true;
 
-        [JsonProperty("keepUnlocked")]
-        public bool KeepUnlocked { get; set; } = false;
-
-        [JsonProperty("lockTime")]
-        public int LockTime { get; set; } = 5; 
+        [JsonProperty("autoLockDuration")]
+        public int AutoLockDuration { get; set; } = 0; // 0 represents "Never"
         
         [JsonProperty("notifyOnPasswordCopy")]
         public bool NotifyOnPasswordCopy { get; set; } = false;

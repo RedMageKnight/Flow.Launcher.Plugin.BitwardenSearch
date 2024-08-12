@@ -77,12 +77,17 @@
         </StackPanel>
 
         <TextBlock Text="Auto-Lock Settings:" FontWeight="Bold" Margin="0,20,0,5"/>
-        <CheckBox x:Name="KeepUnlockedCheckBox" Content="Keep Vault Unlocked Indefinitely" Margin="10,5,0,0" 
-                  Checked="KeepUnlockedCheckBox_Changed" Unchecked="KeepUnlockedCheckBox_Changed"/>
-        <StackPanel Orientation="Horizontal" Margin="10,10,0,0">
-            <TextBlock Text="Auto-lock after (minutes): " VerticalAlignment="Center"/>
-            <TextBox x:Name="LockTimeTextBox" Width="50" PreviewTextInput="LockTimeTextBox_PreviewTextInput" 
-                     TextChanged="LockTimeTextBox_TextChanged" VerticalAlignment="Center"/>
+        <StackPanel Margin="10,10,0,0">
+            <TextBlock Text="Auto-lock after:" VerticalAlignment="Center"/>
+            <ComboBox x:Name="AutoLockComboBox" Width="150" SelectionChanged="AutoLockComboBox_SelectionChanged">
+                <ComboBoxItem Content="Never" Tag="0"/>
+                <ComboBoxItem Content="1 minute" Tag="60"/>
+                <ComboBoxItem Content="5 minutes" Tag="300"/>
+                <ComboBoxItem Content="15 minutes" Tag="900"/>
+                <ComboBoxItem Content="30 minutes" Tag="1800"/>
+                <ComboBoxItem Content="1 hour" Tag="3600"/>
+                <ComboBoxItem Content="4 hours" Tag="14400"/>
+            </ComboBox>
         </StackPanel>
 
         <TextBlock Text="Notification Settings:" FontWeight="Bold" Margin="0,20,0,5"/>

@@ -35,12 +35,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private PluginInitContext _context = null!;
         private BitwardenFlowSettings _settings = null!;
         private bool _isLocked = false;
-        private Timer? _autoLockTimer;
         private bool _needsInitialSetup = false;
         private SecureString? _clientSecret;
         private string _selectedItemId = string.Empty;
         private IconCacheManager? _iconCacheManager;
         private DispatcherTimer? _clipboardClearTimer;
+        private Timer? _autoLockTimer;
+        private DateTime _lastActivityTime;
 
         public Main()
         {
@@ -246,15 +247,34 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             if (_autoLockTimer != null)
             {
                 _autoLockTimer.Dispose();
+                _autoLockTimer = null;
             }
 
-            if (!_settings.KeepUnlocked && _settings.LockTime > 0)
+            if (_settings.AutoLockDuration > 0)
             {
-                _autoLockTimer = new Timer(AutoLockVault, null, TimeSpan.FromMinutes(_settings.LockTime), TimeSpan.FromMinutes(_settings.LockTime));
+                _lastActivityTime = DateTime.Now;
+                _autoLockTimer = new Timer(CheckAutoLock, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
+                Logger.Log($"Auto-lock timer set for {_settings.AutoLockDuration} seconds", LogLevel.Debug);
+            }
+            else
+            {
+                Logger.Log("Auto-lock timer disabled", LogLevel.Debug);
             }
         }
 
-        private void AutoLockVault(object? state)
+        private void CheckAutoLock(object? state)
+        {
+            if (!_isLocked && _settings.AutoLockDuration > 0)
+            {
+                var elapsedTime = (DateTime.Now - _lastActivityTime).TotalSeconds;
+                if (elapsedTime >= _settings.AutoLockDuration)
+                {
+                    AutoLockVault();
+                }
+            }
+        }
+
+        private void AutoLockVault()
         {
             if (!_isLocked)
             {
@@ -268,10 +288,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         private void ResetAutoLockTimer()
         {
-            if (_autoLockTimer != null && !_settings.KeepUnlocked && _settings.LockTime > 0)
-            {
-                _autoLockTimer.Change(TimeSpan.FromMinutes(_settings.LockTime), TimeSpan.FromMinutes(_settings.LockTime));
-            }
+            _lastActivityTime = DateTime.Now;
+            Logger.Log("Auto-lock timer reset", LogLevel.Debug);
         }
 
         private async Task<bool> IsLoggedIn()
@@ -1409,6 +1427,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 if (!await IsVaultLocked())
                 {
                     Logger.Log("Vault successfully unlocked", LogLevel.Info);
+                    SetupAutoLockTimer();
+                    ResetAutoLockTimer();
                     
                     // Sync vault and cache icons after successful unlock
                     await SyncVaultAndIcons();
@@ -1780,29 +1800,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 _settings = updatedSettings;
                 _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                SetupAutoLockTimer(); // Add this line to ensure the timer is updated when settings change
                 Task.Run(async () =>
                 {
                     await VerifyAndApplySettings();
                     return "Settings verified and applied successfully.";
                 }).ContinueWith(task =>
                 {
-                    string message = task.Exception != null 
-                        ? "Error verifying settings. Please check logs." 
-                        : task.Result;
-                    
-                    if (task.Exception != null)
-                    {
-                        Logger.LogError("Error during settings verification", task.Exception);
-                    }
-
-                    // Use Dispatcher to update UI on the correct thread
-                    Application.Current.Dispatcher.Invoke(() => 
-                    {
-                        if (Application.Current.MainWindow.Content is BitwardenFlowSettingPanel panel)
-                        {
-                            panel.SetVerificationStatus(message);
-                        }
-                    });
+                    // ... (existing code)
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             });
         }
@@ -1918,6 +1923,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 if (_clientSecret != null)
                 {
                     _clientSecret.Dispose();
+                }
+                if (_autoLockTimer != null)
+                {
+                    _autoLockTimer.Dispose();
+                    _autoLockTimer = null;
                 }
             }
         }

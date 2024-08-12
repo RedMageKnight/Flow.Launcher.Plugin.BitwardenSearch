@@ -61,9 +61,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             NotifyIconCacheStartCheckBox.IsChecked = _settings.NotifyOnIconCacheStart;
             NotifySyncCompleteCheckBox.IsChecked = _settings.NotifyOnSyncComplete;
 
-            KeepUnlockedCheckBox.IsChecked = _settings.KeepUnlocked;
-            LockTimeTextBox.Text = _settings.LockTime.ToString();
-            LockTimeTextBox.IsEnabled = !_settings.KeepUnlocked;
+            // Initialize the auto-lock dropdown
+            AutoLockComboBox.SelectedIndex = GetIndexFromDuration(_settings.AutoLockDuration);
 
             NotifyPasswordCopyCheckBox.IsChecked = _settings.NotifyOnPasswordCopy;
             NotifyUsernameCopyCheckBox.IsChecked = _settings.NotifyOnUsernameCopy;
@@ -76,6 +75,36 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             // Initialize the clipboard clear combo box
             ClipboardClearComboBox.SelectedIndex = GetIndexFromSeconds(_settings.ClipboardClearSeconds);
+        }
+
+        private void AutoLockComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_settings != null && sender is ComboBox comboBox)
+            {
+                var selectedItem = comboBox.SelectedItem as ComboBoxItem;
+                if (selectedItem != null && int.TryParse(selectedItem.Tag.ToString(), out int duration))
+                {
+                    var oldDuration = _settings.AutoLockDuration;
+                    _settings.AutoLockDuration = duration;
+                    _updateSettings?.Invoke(_settings);  // Make sure this line is present
+                    Logger.Log($"Auto-lock duration changed from {oldDuration} seconds to {duration} seconds", LogLevel.Debug);
+                }
+            }
+        }
+
+        private int GetIndexFromDuration(int duration)
+        {
+            return duration switch
+            {
+                0 => 0,
+                60 => 1,
+                300 => 2,
+                900 => 3,
+                1800 => 4,
+                3600 => 5,
+                14400 => 6,
+                _ => 0
+            };
         }
 
         private void BrowseButton_Click(object sender, RoutedEventArgs e)
@@ -234,30 +263,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 _updateSettings?.Invoke(_settings);
             }
-        }
-
-        private void KeepUnlockedCheckBox_Changed(object sender, RoutedEventArgs e)
-        {
-            if (_settings != null)
-            {
-                _settings.KeepUnlocked = KeepUnlockedCheckBox.IsChecked ?? false;
-                LockTimeTextBox.IsEnabled = !_settings.KeepUnlocked;
-                _updateSettings?.Invoke(_settings);
-            }
-        }
-
-        private void LockTimeTextBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_settings != null && int.TryParse(LockTimeTextBox.Text, out int lockTime))
-            {
-                _settings.LockTime = lockTime;
-                _updateSettings?.Invoke(_settings);
-            }
-        }
-
-        private void LockTimeTextBox_PreviewTextInput(object sender, TextCompositionEventArgs e)
-        {
-            e.Handled = !int.TryParse(e.Text, out _);
         }
 
         private void NotificationCheckBox_Changed(object sender, RoutedEventArgs e)
