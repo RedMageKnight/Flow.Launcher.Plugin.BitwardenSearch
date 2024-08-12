@@ -4,7 +4,7 @@ This is a Flow Launcher plugin for Bitwarden - an application I like to use for 
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
 <h2>Features</h2>
-As of this release (<b>1.3.0</b>), it contains the following capabilities:<br><br>
+As of this release (<b>1.3.1</b>), it contains the following capabilities:<br><br>
 
 1) Fuzzy search across your vault via the bw command with icon population of individual vault items based on the URIs you have saved in your individual vault items.
 2) Icon caching for faster population of visuals.
