@@ -803,16 +803,19 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         var vaultStatus = statusToken.ToString();
                         _lastKnownLockState = vaultStatus.ToLower() != "unlocked";
                         _lastLockCheckTime = DateTime.Now;
+                        Logger.Log($"Vault status check: {vaultStatus}", LogLevel.Debug);
                         return _lastKnownLockState;
                     }
                 }
                 
+                Logger.Log("Failed to get a valid status response", LogLevel.Warning);
                 _lastKnownLockState = true;
                 _lastLockCheckTime = DateTime.Now;
                 return true;
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Logger.LogError("Error checking vault lock status", ex);
                 _lastKnownLockState = true;
                 _lastLockCheckTime = DateTime.Now;
                 return true;
@@ -1313,26 +1316,29 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 UpdateHttpClientAuthorization();
                 await StartBitwardenServer(); // Start the server immediately after unlocking
                 
-                // Wait a bit for the server to fully initialize
-                await Task.Delay(2000);
+                // Wait a bit longer for the server to fully initialize
+                await Task.Delay(5000);
                 
-                // Check if the vault is actually unlocked
-                if (!await IsVaultLocked())
+                // Check multiple times if the vault is actually unlocked
+                for (int i = 0; i < 5; i++)
                 {
-                    Logger.Log("Vault successfully unlocked", LogLevel.Info);
-                    SetupAutoLockTimer();
-                    ResetAutoLockTimer();
-                    
-                    // Sync vault and cache icons after successful unlock
-                    await SyncVaultAndIcons();
-                    
-                    return true;
+                    if (!await IsVaultLocked())
+                    {
+                        Logger.Log("Vault successfully unlocked", LogLevel.Info);
+                        SetupAutoLockTimer();
+                        ResetAutoLockTimer();
+                        
+                        // Sync vault and cache icons after successful unlock
+                        await SyncVaultAndIcons();
+                        
+                        return true;
+                    }
+                    Logger.Log($"Vault still reported as locked. Attempt {i + 1} of 5", LogLevel.Warning);
+                    await Task.Delay(1000); // Wait 1 second between checks
                 }
-                else
-                {
-                    Logger.Log("Unlock process completed, but vault is still reported as locked", LogLevel.Warning);
-                    return false;
-                }
+
+                Logger.Log("Unlock process completed, but vault is still reported as locked after multiple checks", LogLevel.Error);
+                return false;
             }
 
             Logger.Log("Failed to unlock the vault with all quoting methods", LogLevel.Error);
