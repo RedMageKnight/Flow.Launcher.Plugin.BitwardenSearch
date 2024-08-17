@@ -580,99 +580,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return processes.Length > 0;
         }
 
-        private async Task LoginAndUnlock()
-        {
-            try
-            {
-                Logger.Log("Starting login and unlock process", LogLevel.Info);
-
-                if (!string.IsNullOrEmpty(_settings.SessionKey))
-                {
-                    Logger.Log("Existing session found, attempting to use it", LogLevel.Info);
-                    UpdateHttpClientAuthorization();
-                    if (await IsSessionValid())
-                    {
-                        Logger.Log("Existing session is valid", LogLevel.Info);
-                        _isLocked = false;
-                        return;
-                    }
-                    Logger.Log("Existing session is invalid, need to re-authenticate", LogLevel.Info);
-                }
-
-                if (_clientSecret == null || _clientSecret.Length == 0)
-                {
-                    Logger.Log("Client secret is missing, vault is locked", LogLevel.Info);
-                    _isLocked = true;
-                    return;
-                }
-
-                Logger.Log("No valid session found, vault is locked", LogLevel.Info);
-                _isLocked = true;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Failed during login and unlock process", ex);
-                _isLocked = true;
-            }
-        }
-
-        private async Task CacheAllIconsAsync()
-        {
-            try
-            {
-                var url = $"{ApiBaseUrl}/list/object/items";
-                var response = await _httpClient.GetAsync(url);
-                
-                if (!response.IsSuccessStatusCode)
-                {
-                    Logger.Log($"Failed to retrieve items for icon caching. Status code: {response.StatusCode}", LogLevel.Error);
-                    return;
-                }
-
-                var responseContent = await response.Content.ReadAsStringAsync();
-                var jObject = JObject.Parse(responseContent);
-                var dataArray = jObject["data"]?["data"] as JArray;
-
-                if (dataArray == null)
-                {
-                    Logger.Log("No data array found in response for icon caching", LogLevel.Warning);
-                    return;
-                }
-
-                var items = dataArray
-                    .Select(item => item.ToObject<BitwardenItem>())
-                    .Where(item => item != null)
-                    .Cast<BitwardenItem>()  // This cast removes the nullability
-                    .ToList();
-
-                if (_iconCacheManager != null)
-                {
-                    await _iconCacheManager.CacheAllIconsAsync(items);
-                }
-                else
-                {
-                    Logger.Log("IconCacheManager is not initialized", LogLevel.Warning);
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Error during icon caching", ex);
-            }
-        }
-
-        private async Task<bool> IsSessionValid()
-        {
-            try
-            {
-                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/sync");
-                return response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
         private async Task StartBitwardenServer()
         {
             if (!IsBitwardenCliInstalled())
@@ -795,20 +702,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
             }
             return inUse;
-        }
-
-        private async Task<bool> IsExistingServerValid()
-        {
-            try
-            {
-                using var client = new HttpClient();
-                var response = await client.GetAsync($"{ApiBaseUrl}/status");
-                return response.IsSuccessStatusCode;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         private void KillProcessUsingPort(int port)
@@ -1533,12 +1426,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             // Remove any potential password information from the exception message
             return ex.ToString().Replace(sensitiveData, "[REDACTED]");
-        }
-        
-        private string ExtractSessionKey(string output)
-        {
-            var match = System.Text.RegularExpressions.Regex.Match(output, @"BW_SESSION=""(.+?)""");
-            return match.Success ? match.Groups[1].Value : string.Empty;
         }
 
         private enum ActionType
