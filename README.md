@@ -29,6 +29,10 @@ Install from the Plugin Store from the Flow Launcher settings menu or type the f
 
 <code>pm install bitwarden</code>
 
+<h2>Regarding Self-Hosted Instances</h2> 
+If you use a self-hosted instance of Bitwarden/Vaultwarden, it has been reported to me that it will work (which I would generally expect since the API endpoints are not different), but you need to set your server settings in the CLI manually for now before attempting to login using the plugin.<br><br> 
+I intend on adding server options to the plugin settings in a future update, but for now this step will have to be performed first if you want it to connect to your self-hosted instance. I don't have a self-hosted instance to test things these days so my ability to support these scenarios are limited.
+
 <h2>How to Use:</h2>
 <ul>
   <li>Upon installation of the plugin, you'll need to configure the plugin settings and provide the following attributes:</li>
