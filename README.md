@@ -21,7 +21,7 @@ As of this release (<b>1.3.1</b>), it contains the following capabilities:<br><b
 
 <h2>Requirements</h2>
 In order to use this plugin, you have to have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI downloaded</a>.<br>
-<li>You <b>MUST</b> use version 2024.7.2 or later - otherwise the API login process is broken on older versions of the CLI.</li>
+<li>You <b>MUST</b> use any version between 2024.7.2 and 2024.8.2 - the API login process is broken on older versions and 2024.9.0 has binary issues that interfere with the login process.</li>
 <li><b>NEW</b> - You can now use the settings menu for the plugin to help set your environment variables if you navigate to your bw.exe file on your computer using the included file picker.</li>
 
 <h2>Installation Instructions</h2>
