@@ -92,7 +92,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private int GetIndexFromDuration(int duration)
+        private static int GetIndexFromDuration(int duration)
         {
             return duration switch
             {
@@ -176,7 +176,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _updateSettings?.Invoke(_settings);
         }
 
-        private bool IsPathInEnvironmentVariable(string path, EnvironmentVariableTarget target)
+        private static bool IsPathInEnvironmentVariable(string path, EnvironmentVariableTarget target)
         {
             var pathEnv = Environment.GetEnvironmentVariable("PATH", target);
             if (string.IsNullOrEmpty(pathEnv)) return false;
@@ -378,7 +378,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private int GetIndexFromSeconds(int seconds)
+        private static int GetIndexFromSeconds(int seconds)
         {
             return seconds switch
             {

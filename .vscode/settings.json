@@ -7,5 +7,12 @@
         "**/*.csproj.user": true
     },
     "omnisharp.autoStart": false,
-    "dotnet.defaultSolution": "Flow.Launcher.Plugin.BitwardenSearch.sln"
+    "dotnet.defaultSolution": "Flow.Launcher.Plugin.BitwardenSearch.sln",
+    /* 
+        The below line is important as it prevents the C# extention 
+        in VS Code from automatically creating a SLN file 
+        and messing up the build process while still allowing
+        me to use it.
+    */
+    "dotnet.automaticallyCreateSolutionInWorkspace": false 
 }

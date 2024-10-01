@@ -7,14 +7,11 @@ using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Linq;
-using System.Text;
-using Flow.Launcher.Plugin;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
 using System.IO;
 using Newtonsoft.Json;
 using System.Security;
-using System.Runtime.InteropServices;
 using System.Net.Sockets;
 using System.Windows.Input;
 
@@ -27,7 +24,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private Process? _serveProcess;
         private bool _isInitialized = false;
         private readonly SemaphoreSlim _initializationLock = new SemaphoreSlim(1, 1);
-        private readonly Dictionary<string, string> _faviconUrls = new Dictionary<string, string>();
         private string? _faviconCacheDir;
         private Dictionary<string, (Result Result, BitwardenItem Item)> _currentResults = new Dictionary<string, (Result, BitwardenItem)>();
         private const int DebounceDelay = 300; // milliseconds
@@ -42,6 +38,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private DispatcherTimer? _clipboardClearTimer;
         private Timer? _autoLockTimer;
         private DateTime _lastActivityTime;
+        private bool _lastKnownLockState = true;
+        private DateTime _lastLockCheckTime = DateTime.MinValue;
+        private static readonly TimeSpan LockCheckCooldown = TimeSpan.FromSeconds(5);
+        private SemaphoreSlim _iconCacheThrottler = new SemaphoreSlim(5);
 
         public Main()
         {
@@ -121,7 +121,78 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private bool IsBitwardenCliAccessible()
+        public async Task InitAsync(PluginInitContext context)
+        {
+            _context = context;
+            _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
+            Logger.Initialize(context.CurrentPluginMetadata.PluginDirectory, _settings);
+            Logger.Log("Plugin initialization started", LogLevel.Info);
+
+            // Verify and apply settings
+            await VerifyAndApplySettings();
+
+            Logger.Log("Plugin initialization completed", LogLevel.Info);
+
+            // Start the initialization process
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await EnsureInitialized();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError("Error during background initialization", ex);
+                }
+            });
+            SetupAutoLockTimer();
+        }
+        
+        private async Task EnsureBitwardenSetup()
+        {
+            if (!IsBitwardenCliInstalled())
+            {
+                Logger.Log("Bitwarden CLI not installed or not functioning properly. Setup cannot proceed.", LogLevel.Error);
+                _context.API.ShowMsg("Bitwarden CLI Error", "Please ensure Bitwarden CLI is properly installed and functioning.");
+                _needsInitialSetup = true;
+                return;
+            }
+
+            try
+            {
+                Logger.Log("Starting Bitwarden setup");
+                
+                var isLoggedIn = await IsLoggedIn();
+                if (!isLoggedIn)
+                {
+                    var loginSuccess = await LoginWithApiKey();
+                    if (!loginSuccess)
+                    {
+                        Logger.Log("Failed to log in", LogLevel.Error);
+                        _needsInitialSetup = true;
+                        return;
+                    }
+                }
+                else
+                {
+                    Logger.Log("Already logged in to Bitwarden CLI", LogLevel.Info);
+                }
+                
+                _isInitialized = true;
+                _needsInitialSetup = false;
+                _isLocked = await IsVaultLocked();
+                Logger.Log($"Bitwarden setup completed successfully. Vault is {(_isLocked ? "locked" : "unlocked")}.", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error during Bitwarden setup", ex);
+                _isInitialized = false;
+                _needsInitialSetup = true;
+                _isLocked = true;
+            }
+        }
+        
+        private static bool IsBitwardenCliAccessible()
         {
             try
             {
@@ -150,33 +221,64 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        public async Task InitAsync(PluginInitContext context)
+        public static bool IsBitwardenCliInstalled()
         {
-            _context = context;
-            _settings = context.API.LoadSettingJsonStorage<BitwardenFlowSettings>();
-            Logger.Initialize(context.CurrentPluginMetadata.PluginDirectory, _settings);
-            Logger.Log("Plugin initialization started", LogLevel.Info);
-
-            // Verify and apply settings
-            await VerifyAndApplySettings();
-
-            Logger.Log("Plugin initialization completed", LogLevel.Info);
-
-            // Start the initialization process
-            _ = Task.Run(async () =>
+            try
             {
-                try
+                using var process = new Process
                 {
-                    await EnsureInitialized();
-                }
-                catch (Exception ex)
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = "--version",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+                process.Start();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+                
+                if (!string.IsNullOrEmpty(output))
                 {
-                    Logger.LogError("Error during background initialization", ex);
+                    Logger.Log($"Bitwarden CLI found. Version: {output.Trim()}", LogLevel.Info);
+                    return true;
                 }
-            });
-            SetupAutoLockTimer();
+                else if (!string.IsNullOrEmpty(error))
+                {
+                    Logger.Log($"Bitwarden CLI error: {error.Trim()}", LogLevel.Warning);
+                    return false;
+                }
+                else
+                {
+                    Logger.Log("Bitwarden CLI not found or returned empty output.", LogLevel.Warning);
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.Log($"Error checking for Bitwarden CLI: {ex.Message}", LogLevel.Error);
+                return false;
+            }
         }
 
+        private static bool IsBitwardenCliRunning()
+        {
+            var processes = Process.GetProcessesByName("bw");
+            return processes.Length > 0;
+        }
+        
+        private async Task EnsureServerRunning()
+        {
+            if (_serveProcess == null || _serveProcess.HasExited)
+            {
+                await StartBitwardenServer();
+            }
+        }
+        
         private async Task<bool> VerifyAndApplySettings()
         {
             Logger.Log("Verifying and applying settings", LogLevel.Info);
@@ -291,28 +393,188 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             _lastActivityTime = DateTime.Now;
             Logger.Log("Auto-lock timer reset", LogLevel.Debug);
         }
-
-        private async Task<bool> IsLoggedIn()
+        
+        private async Task<bool> IsVaultLocked()
         {
-            var process = new Process
+            if (DateTime.Now - _lastLockCheckTime < LockCheckCooldown)
             {
-                StartInfo = new ProcessStartInfo
+                return _lastKnownLockState;
+            }
+
+            try
+            {
+                if (string.IsNullOrEmpty(_settings.SessionKey))
                 {
-                    FileName = "bw",
-                    Arguments = "login --check",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    CreateNoWindow = true
+                    _lastKnownLockState = true;
+                    _lastLockCheckTime = DateTime.Now;
+                    return true;
+                }
+
+                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    var status = JsonConvert.DeserializeObject<JObject>(content);
+                    
+                    if (status?["data"]?["template"]?["status"] is JToken statusToken)
+                    {
+                        var vaultStatus = statusToken.ToString();
+                        _lastKnownLockState = vaultStatus.ToLower() != "unlocked";
+                        _lastLockCheckTime = DateTime.Now;
+                        Logger.Log($"Vault status check: {vaultStatus}", LogLevel.Debug);
+                        return _lastKnownLockState;
+                    }
+                }
+                
+                Logger.Log("Failed to get a valid status response", LogLevel.Warning);
+                _lastKnownLockState = true;
+                _lastLockCheckTime = DateTime.Now;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error checking vault lock status", ex);
+                _lastKnownLockState = true;
+                _lastLockCheckTime = DateTime.Now;
+                return true;
+            }
+        }
+        
+        private List<Result> LockVault()
+        {
+            _isLocked = true;
+            _settings.SessionKey = string.Empty;
+            _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+            UpdateHttpClientAuthorization();
+
+            if (_autoLockTimer != null)
+            {
+                _autoLockTimer.Dispose();
+                _autoLockTimer = null;
+            }
+
+            return new List<Result>
+            {
+                new Result
+                {
+                    Title = "Bitwarden vault locked",
+                    SubTitle = "Use 'bw /unlock <password>' to unlock",
+                    IcoPath = "Images/bitwarden.png"
                 }
             };
-
-            process.Start();
-            string output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-
-            return output.Trim().Equals("You are logged in!", StringComparison.OrdinalIgnoreCase);
         }
 
+        private async Task<bool> UnlockVault(string masterPassword)
+        {
+            Logger.Log("Starting UnlockVault method", LogLevel.Debug);
+
+            // Try unlocking with different quoting methods
+            if (await TryUnlock(masterPassword, QuoteMethod.None) ||
+                await TryUnlock(masterPassword, QuoteMethod.Single) ||
+                await TryUnlock(masterPassword, QuoteMethod.Double))
+            {
+                UpdateHttpClientAuthorization();
+                await StartBitwardenServer(); // Start the server immediately after unlocking
+                
+                // Wait a bit longer for the server to fully initialize
+                await Task.Delay(5000);
+                
+                // Check multiple times if the vault is actually unlocked
+                for (int i = 0; i < 5; i++)
+                {
+                    if (!await IsVaultLocked())
+                    {
+                        Logger.Log("Vault successfully unlocked", LogLevel.Info);
+                        SetupAutoLockTimer();
+                        ResetAutoLockTimer();
+                        
+                        // Sync vault and cache icons after successful unlock
+                        await SyncVaultAndIcons();
+                        
+                        return true;
+                    }
+                    Logger.Log($"Vault still reported as locked. Attempt {i + 1} of 5", LogLevel.Warning);
+                    await Task.Delay(1000); // Wait 1 second between checks
+                }
+
+                Logger.Log("Unlock process completed, but vault is still reported as locked after multiple checks", LogLevel.Error);
+                return false;
+            }
+
+            Logger.Log("Failed to unlock the vault with all quoting methods", LogLevel.Error);
+            return false;
+        }
+
+        private async Task<bool> TryUnlock(string masterPassword, QuoteMethod quoteMethod)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+                string arguments = quoteMethod switch
+                {
+                    QuoteMethod.None => $"unlock {masterPassword} --raw",
+                    QuoteMethod.Single => $"unlock '{masterPassword}' --raw",
+                    QuoteMethod.Double => $"unlock \"{masterPassword}\" --raw",
+                    _ => throw new ArgumentOutOfRangeException(nameof(quoteMethod))
+                };
+
+                var unlockProcess = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "bw",
+                        Arguments = arguments,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    }
+                };
+
+                Logger.Log($"Starting Bitwarden CLI unlock process with {quoteMethod} quoting", LogLevel.Debug);
+                unlockProcess.Start();
+
+                string unlockOutput = await unlockProcess.StandardOutput.ReadToEndAsync();
+                string unlockError = await unlockProcess.StandardError.ReadToEndAsync();
+
+                await unlockProcess.WaitForExitAsync(cts.Token);
+
+                // Log completion without revealing sensitive information
+                Logger.Log($"Unlock process completed for {quoteMethod} quoting", LogLevel.Debug);
+
+                if (!string.IsNullOrEmpty(unlockError))
+                {
+                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
+                    return false;
+                }
+
+                if (!string.IsNullOrEmpty(unlockOutput))
+                {
+                    _settings.SessionKey = unlockOutput.Trim();
+                    _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                    Logger.Log("Session key extracted and saved", LogLevel.Info);
+                    _isLocked = false;
+                    return true;
+                }
+                else
+                {
+                    Logger.Log($"Failed to extract session key with {quoteMethod} quoting", LogLevel.Error);
+                    return false;
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Logger.Log($"Unlock operation timed out with {quoteMethod} quoting", LogLevel.Error);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Exception during unlock process with {quoteMethod} quoting", ex);
+                return false;
+            }
+        }
+        
         private async Task<bool> LoginWithApiKey()
         {
             try
@@ -412,7 +674,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private async Task<bool> VerifyApiKey()
+        private static async Task<bool> VerifyApiKey()
         {
             try
             {
@@ -462,6 +724,27 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
+        private static async Task<bool> IsLoggedIn()
+        {
+            var process = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "bw",
+                    Arguments = "login --check",
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    CreateNoWindow = true
+                }
+            };
+
+            process.Start();
+            string output = await process.StandardOutput.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            return output.Trim().Equals("You are logged in!", StringComparison.OrdinalIgnoreCase);
+        }
+
         private async Task EnsureInitialized()
         {
             if (_isInitialized) return;
@@ -484,100 +767,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 _initializationLock.Release();
             }
-        }
-
-        private async Task EnsureBitwardenSetup()
-        {
-            if (!IsBitwardenCliInstalled())
-            {
-                Logger.Log("Bitwarden CLI not installed or not functioning properly. Setup cannot proceed.", LogLevel.Error);
-                _context.API.ShowMsg("Bitwarden CLI Error", "Please ensure Bitwarden CLI is properly installed and functioning.");
-                _needsInitialSetup = true;
-                return;
-            }
-
-            try
-            {
-                Logger.Log("Starting Bitwarden setup");
-                
-                var isLoggedIn = await IsLoggedIn();
-                if (!isLoggedIn)
-                {
-                    var loginSuccess = await LoginWithApiKey();
-                    if (!loginSuccess)
-                    {
-                        Logger.Log("Failed to log in", LogLevel.Error);
-                        _needsInitialSetup = true;
-                        return;
-                    }
-                }
-                else
-                {
-                    Logger.Log("Already logged in to Bitwarden CLI", LogLevel.Info);
-                }
-                
-                _isInitialized = true;
-                _needsInitialSetup = false;
-                _isLocked = await IsVaultLocked();
-                Logger.Log($"Bitwarden setup completed successfully. Vault is {(_isLocked ? "locked" : "unlocked")}.", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Error during Bitwarden setup", ex);
-                _isInitialized = false;
-                _needsInitialSetup = true;
-                _isLocked = true;
-            }
-        }
-
-        public bool IsBitwardenCliInstalled()
-        {
-            try
-            {
-                using var process = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "bw",
-                        Arguments = "--version",
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    }
-                };
-                process.Start();
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
-                process.WaitForExit();
-                
-                if (!string.IsNullOrEmpty(output))
-                {
-                    Logger.Log($"Bitwarden CLI found. Version: {output.Trim()}", LogLevel.Info);
-                    return true;
-                }
-                else if (!string.IsNullOrEmpty(error))
-                {
-                    Logger.Log($"Bitwarden CLI error: {error.Trim()}", LogLevel.Warning);
-                    return false;
-                }
-                else
-                {
-                    Logger.Log("Bitwarden CLI not found or returned empty output.", LogLevel.Warning);
-                    return false;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Log($"Error checking for Bitwarden CLI: {ex.Message}", LogLevel.Error);
-                return false;
-            }
-        }
-
-        private bool IsBitwardenCliRunning()
-        {
-            var processes = Process.GetProcessesByName("bw");
-            return processes.Length > 0;
         }
 
         private async Task StartBitwardenServer()
@@ -686,7 +875,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private bool IsPortInUse(int port)
+        private static bool IsPortInUse(int port)
         {
             bool inUse = false;
             using (var tcpClient = new TcpClient())
@@ -704,7 +893,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return inUse;
         }
 
-        private void KillProcessUsingPort(int port)
+        private static void KillProcessUsingPort(int port)
         {
             try
             {
@@ -769,56 +958,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 _httpClient.DefaultRequestHeaders.Authorization = null;
                 Logger.Log("Authorization cleared due to missing session key", LogLevel.Info);
-            }
-        }
-
-        private bool _lastKnownLockState = true;
-        private DateTime _lastLockCheckTime = DateTime.MinValue;
-        private static readonly TimeSpan LockCheckCooldown = TimeSpan.FromSeconds(5);
-
-        private async Task<bool> IsVaultLocked()
-        {
-            if (DateTime.Now - _lastLockCheckTime < LockCheckCooldown)
-            {
-                return _lastKnownLockState;
-            }
-
-            try
-            {
-                if (string.IsNullOrEmpty(_settings.SessionKey))
-                {
-                    _lastKnownLockState = true;
-                    _lastLockCheckTime = DateTime.Now;
-                    return true;
-                }
-
-                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
-                if (response.IsSuccessStatusCode)
-                {
-                    var content = await response.Content.ReadAsStringAsync();
-                    var status = JsonConvert.DeserializeObject<JObject>(content);
-                    
-                    if (status?["data"]?["template"]?["status"] is JToken statusToken)
-                    {
-                        var vaultStatus = statusToken.ToString();
-                        _lastKnownLockState = vaultStatus.ToLower() != "unlocked";
-                        _lastLockCheckTime = DateTime.Now;
-                        Logger.Log($"Vault status check: {vaultStatus}", LogLevel.Debug);
-                        return _lastKnownLockState;
-                    }
-                }
-                
-                Logger.Log("Failed to get a valid status response", LogLevel.Warning);
-                _lastKnownLockState = true;
-                _lastLockCheckTime = DateTime.Now;
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Error checking vault lock status", ex);
-                _lastKnownLockState = true;
-                _lastLockCheckTime = DateTime.Now;
-                return true;
             }
         }
 
@@ -1272,172 +1411,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private async Task EnsureServerRunning()
-        {
-            if (_serveProcess == null || _serveProcess.HasExited)
-            {
-                await StartBitwardenServer();
-            }
-        }
-
-        private List<Result> LockVault()
-        {
-            _isLocked = true;
-            _settings.SessionKey = string.Empty;
-            _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-            UpdateHttpClientAuthorization();
-
-            if (_autoLockTimer != null)
-            {
-                _autoLockTimer.Dispose();
-                _autoLockTimer = null;
-            }
-
-            return new List<Result>
-            {
-                new Result
-                {
-                    Title = "Bitwarden vault locked",
-                    SubTitle = "Use 'bw /unlock <password>' to unlock",
-                    IcoPath = "Images/bitwarden.png"
-                }
-            };
-        }
-
-        private async Task<bool> UnlockVault(string masterPassword)
-        {
-            Logger.Log("Starting UnlockVault method", LogLevel.Debug);
-
-            // Try unlocking with different quoting methods
-            if (await TryUnlock(masterPassword, QuoteMethod.None) ||
-                await TryUnlock(masterPassword, QuoteMethod.Single) ||
-                await TryUnlock(masterPassword, QuoteMethod.Double))
-            {
-                UpdateHttpClientAuthorization();
-                await StartBitwardenServer(); // Start the server immediately after unlocking
-                
-                // Wait a bit longer for the server to fully initialize
-                await Task.Delay(5000);
-                
-                // Check multiple times if the vault is actually unlocked
-                for (int i = 0; i < 5; i++)
-                {
-                    if (!await IsVaultLocked())
-                    {
-                        Logger.Log("Vault successfully unlocked", LogLevel.Info);
-                        SetupAutoLockTimer();
-                        ResetAutoLockTimer();
-                        
-                        // Sync vault and cache icons after successful unlock
-                        await SyncVaultAndIcons();
-                        
-                        return true;
-                    }
-                    Logger.Log($"Vault still reported as locked. Attempt {i + 1} of 5", LogLevel.Warning);
-                    await Task.Delay(1000); // Wait 1 second between checks
-                }
-
-                Logger.Log("Unlock process completed, but vault is still reported as locked after multiple checks", LogLevel.Error);
-                return false;
-            }
-
-            Logger.Log("Failed to unlock the vault with all quoting methods", LogLevel.Error);
-            return false;
-        }
-
-        private enum QuoteMethod
-        {
-            None,
-            Single,
-            Double
-        }
-
-        private async Task<bool> TryUnlock(string masterPassword, QuoteMethod quoteMethod)
-        {
-            try
-            {
-                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-                string arguments = quoteMethod switch
-                {
-                    QuoteMethod.None => $"unlock {masterPassword} --raw",
-                    QuoteMethod.Single => $"unlock '{masterPassword}' --raw",
-                    QuoteMethod.Double => $"unlock \"{masterPassword}\" --raw",
-                    _ => throw new ArgumentOutOfRangeException(nameof(quoteMethod))
-                };
-
-                var unlockProcess = new Process
-                {
-                    StartInfo = new ProcessStartInfo
-                    {
-                        FileName = "bw",
-                        Arguments = arguments,
-                        UseShellExecute = false,
-                        RedirectStandardOutput = true,
-                        RedirectStandardError = true,
-                        CreateNoWindow = true
-                    }
-                };
-
-                Logger.Log($"Starting Bitwarden CLI unlock process with {quoteMethod} quoting", LogLevel.Debug);
-                unlockProcess.Start();
-
-                string unlockOutput = await unlockProcess.StandardOutput.ReadToEndAsync();
-                string unlockError = await unlockProcess.StandardError.ReadToEndAsync();
-
-                await unlockProcess.WaitForExitAsync(cts.Token);
-
-                // Log completion without revealing sensitive information
-                Logger.Log($"Unlock process completed for {quoteMethod} quoting", LogLevel.Debug);
-
-                if (!string.IsNullOrEmpty(unlockError))
-                {
-                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
-                    return false;
-                }
-
-                if (!string.IsNullOrEmpty(unlockOutput))
-                {
-                    _settings.SessionKey = unlockOutput.Trim();
-                    _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-                    Logger.Log("Session key extracted and saved", LogLevel.Info);
-                    _isLocked = false;
-                    return true;
-                }
-                else
-                {
-                    Logger.Log($"Failed to extract session key with {quoteMethod} quoting", LogLevel.Error);
-                    return false;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                Logger.Log($"Unlock operation timed out with {quoteMethod} quoting", LogLevel.Error);
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError($"Exception during unlock process with {quoteMethod} quoting", ex);
-                return false;
-            }
-        }
-
-        private string SanitizeErrorMessage(string errorMessage, string sensitiveData)
+        private static string SanitizeErrorMessage(string errorMessage, string sensitiveData)
         {
             // Remove any potential password information from the error message
             return errorMessage.Replace(sensitiveData, "[REDACTED]");
-        }
-
-        private string SanitizeExceptionMessage(Exception ex, string sensitiveData)
-        {
-            // Remove any potential password information from the exception message
-            return ex.ToString().Replace(sensitiveData, "[REDACTED]");
-        }
-
-        private enum ActionType
-        {
-            Default,
-            CopyTotp
         }
 
         private async Task<bool> HandleItemAction(ExtendedActionContext context, BitwardenItem item, ActionType actionType)
@@ -1501,7 +1478,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private string BuildSubTitle(BitwardenItem item)
+        private static string BuildSubTitle(BitwardenItem item)
         {
             var parts = new List<string>();
 
@@ -1521,32 +1498,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
 
             return string.Join(" | ", parts);
-        }
-
-        private string GetDetailedItemInfo(BitwardenItem item)
-        {
-            var sb = new StringBuilder();
-
-            sb.AppendLine($"Name: {item.name}");
-
-            if (item.login != null)
-            {
-                if (!string.IsNullOrEmpty(item.login.username))
-                {
-                    sb.AppendLine($"Username: {item.login.username}");
-                }
-
-                if (item.login.uris != null && item.login.uris.Any())
-                {
-                    sb.AppendLine("URLs:");
-                    foreach (var uri in item.login.uris)
-                    {
-                        sb.AppendLine($"  - {uri.uri}");
-                    }
-                }
-            }
-
-            return sb.ToString();
         }
 
         private bool ShowUriListPopup(BitwardenItem item)
@@ -1645,48 +1596,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        private void CopyToClipboard(string? content, string itemType)
-        {
-            if (content == null) return;
-            
-            System.Windows.Application.Current.Dispatcher.Invoke(() =>
-            {
-                try
-                {
-                    System.Windows.Clipboard.SetText(content);
-                    Logger.Log($"Copied {itemType} to clipboard", LogLevel.Debug);
-                    
-                    bool shouldNotify = false;
-                    switch (itemType.ToLower())
-                    {
-                        case "password":
-                            shouldNotify = _settings.NotifyOnPasswordCopy;
-                            break;
-                        case "username":
-                            shouldNotify = _settings.NotifyOnUsernameCopy;
-                            break;
-                        case "uri":
-                            shouldNotify = _settings.NotifyOnUriCopy;
-                            break;
-                        case "totp":
-                            shouldNotify = _settings.NotifyOnTotpCopy;
-                            break;
-                    }
-
-                    if (shouldNotify)
-                    {
-                        _context.API.ShowMsg($"{itemType} Copied", $"{itemType} has been copied to clipboard", string.Empty);
-                    }
-
-                    SetupClipboardClearTimer();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError($"Failed to copy {itemType} to clipboard", ex);
-                }
-            });
-        }
-
         public Control CreateSettingPanel()
         {
             return new BitwardenFlowSettingPanel(_settings, updatedSettings =>
@@ -1703,197 +1612,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     // ... (existing code)
                 }, TaskScheduler.FromCurrentSynchronizationContext());
             });
-        }
-
-        private void SetVerificationStatus(BitwardenFlowSettingPanel? panel, string status)
-        {
-            if (panel != null)
-            {
-                panel.SetVerificationStatus(status);
-            }
-            else
-            {
-                Logger.Log($"Unable to set verification status: {status}", LogLevel.Warning);
-            }
-        }
-
-        private void UpdateSettings(BitwardenFlowSettings newSettings)
-        {
-            _settings = newSettings;
-            _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
-            Logger.Log("Settings updated", LogLevel.Info);
-            SetupAutoLockTimer();
-
-            // Attempt to initialize and log in immediately after settings are updated
-            Task.Run(async () => 
-            {
-                await VerifyAndApplySettings();
-                await EnsureBitwardenSetup();
-                _isInitialized = true;
-                _needsInitialSetup = false;
-                Logger.Log("Plugin reinitialized after settings update", LogLevel.Info);
-            }).ContinueWith(task => 
-            {
-                if (task.IsFaulted)
-                {
-                    if (task.Exception != null)
-                    {
-                        Logger.LogError("Failed to reinitialize plugin after settings update", task.Exception);
-                    }
-                    else
-                    {
-                        Logger.Log("Failed to reinitialize plugin after settings update, but no exception was thrown", LogLevel.Error);
-                    }
-                    _isInitialized = false;
-                    _needsInitialSetup = true;
-                }
-            }, TaskScheduler.FromCurrentSynchronizationContext());
-        }
-
-        private async Task AttemptLogin()
-        {
-            try
-            {
-                Logger.Log("Attempting to log in after settings update", LogLevel.Info);
-                await VerifyAndApplySettings();
-                await EnsureBitwardenSetup();
-                _isInitialized = true;
-                _needsInitialSetup = false;
-                Logger.Log("Login attempt after settings update completed", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                Logger.LogError("Error during login attempt after settings update", ex);
-                _isInitialized = false;
-                _needsInitialSetup = true;
-            }
-        }
-
-        public void Dispose()
-        {
-            Dispose(true);
-            GC.SuppressFinalize(this);
-        }
-
-        private SemaphoreSlim _iconCacheThrottler = new SemaphoreSlim(5);
-        
-        protected virtual void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                _httpClient.Dispose();
-        
-                // Dispose of the Bitwarden server process
-                if (_serveProcess != null)
-                {
-                    try
-                    {
-                        if (!_serveProcess.HasExited)
-                        {
-                            _serveProcess.Kill();
-                            _serveProcess.WaitForExit(5000); // Wait up to 5 seconds for the process to exit
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Logger.LogError("Error while killing Bitwarden server process", ex);
-                    }
-                    finally
-                    {
-                        _serveProcess.Dispose();
-                        _serveProcess = null;
-                    }
-                }
-
-                _initializationLock.Dispose();
-                _autoLockTimer?.Dispose();
-                _iconCacheThrottler.Dispose();
-                if (_clipboardClearTimer != null)
-                {
-                    _clipboardClearTimer.Stop();
-                    _clipboardClearTimer = null;
-                }
-                if (_clientSecret != null)
-                {
-                    _clientSecret.Dispose();
-                }
-                if (_autoLockTimer != null)
-                {
-                    _autoLockTimer.Dispose();
-                    _autoLockTimer = null;
-                }
-            }
-        }
-
-        private static readonly object _faviconLock = new object();
-
-        private async Task<string> DownloadAndCacheFaviconAsync(string url, CancellationToken token)
-        {
-            if (string.IsNullOrEmpty(_faviconCacheDir))
-            {
-                Logger.Log("Favicon cache directory is not set. Using default icon.", LogLevel.Warning);
-                return "Images/bitwarden.png";
-            }
-
-            var uri = new Uri(url);
-            var domain = uri.Host;
-            var safeFileName = string.Join("_", domain.Split(Path.GetInvalidFileNameChars()));
-            var filePath = Path.Combine(_faviconCacheDir, $"{safeFileName}.ico");
-
-            Logger.Log($"Attempting to cache favicon for {domain}", LogLevel.Debug);
-
-            if (File.Exists(filePath) && (DateTime.Now - File.GetLastWriteTime(filePath)).TotalDays < 1)
-            {
-                Logger.Log($"Using cached favicon for {domain}", LogLevel.Debug);
-                return filePath;
-            }
-
-            const int maxRetries = 3;
-            for (int attempt = 0; attempt < maxRetries; attempt++)
-            {
-                try
-                {
-                    using var cts = CancellationTokenSource.CreateLinkedTokenSource(token);
-                    cts.CancelAfter(TimeSpan.FromSeconds(5));
-
-                    var faviconUrl = $"https://www.google.com/s2/favicons?domain={domain}&sz=32";
-                    Logger.Log($"Downloading favicon for {domain}", LogLevel.Debug);
-
-                    using var response = await _httpClient.GetAsync(faviconUrl, cts.Token);
-                    if (response.IsSuccessStatusCode)
-                    {
-                        using var stream = await response.Content.ReadAsStreamAsync(cts.Token);
-                        lock (_faviconLock)
-                        {
-                            using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                            stream.CopyTo(fileStream);
-                        }
-                        Logger.Log($"Downloaded and cached favicon for {domain}", LogLevel.Debug);
-                        return filePath;
-                    }
-                    else
-                    {
-                        Logger.Log($"Failed to download favicon for {domain}: {response.StatusCode}", LogLevel.Info);
-                    }
-                }
-                catch (TaskCanceledException)
-                {
-                    Logger.Log($"Favicon download timed out for {domain}", LogLevel.Info);
-                }
-                catch (Exception ex)
-                {
-                    Logger.Log($"Error downloading favicon for {domain}: {ex.Message}", LogLevel.Info);
-                }
-
-                if (attempt < maxRetries - 1)
-                {
-                    Logger.Log($"Retrying favicon download for {domain} (attempt {attempt + 2}/{maxRetries})", LogLevel.Debug);
-                    await Task.Delay(1000 * (attempt + 1), token);
-                }
-            }
-
-            Logger.Log($"Failed to download favicon for {domain} after {maxRetries} attempts. Using default icon.", LogLevel.Info);
-            return "Images/bitwarden.png";
         }
 
         private async Task<bool> CopyTotpCode(BitwardenItem item)
@@ -1950,6 +1668,48 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             return string.Empty;
         }
 
+        private void CopyToClipboard(string? content, string itemType)
+        {
+            if (content == null) return;
+            
+            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+            {
+                try
+                {
+                    System.Windows.Clipboard.SetText(content);
+                    Logger.Log($"Copied {itemType} to clipboard", LogLevel.Debug);
+                    
+                    bool shouldNotify = false;
+                    switch (itemType.ToLower())
+                    {
+                        case "password":
+                            shouldNotify = _settings.NotifyOnPasswordCopy;
+                            break;
+                        case "username":
+                            shouldNotify = _settings.NotifyOnUsernameCopy;
+                            break;
+                        case "uri":
+                            shouldNotify = _settings.NotifyOnUriCopy;
+                            break;
+                        case "totp":
+                            shouldNotify = _settings.NotifyOnTotpCopy;
+                            break;
+                    }
+
+                    if (shouldNotify)
+                    {
+                        _context.API.ShowMsg($"{itemType} Copied", $"{itemType} has been copied to clipboard", string.Empty);
+                    }
+
+                    SetupClipboardClearTimer();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"Failed to copy {itemType} to clipboard", ex);
+                }
+            });
+        }
+        
         private void SetupClipboardClearTimer()
         {
             if (_clipboardClearTimer != null)
@@ -1968,7 +1728,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _clipboardClearTimer.Start();
             }
         }
-
+        
         private void ClearClipboard(object? sender, EventArgs e)
         {
             System.Windows.Application.Current.Dispatcher.Invoke(() =>
@@ -1990,7 +1750,74 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _clipboardClearTimer = null;
             }
         }
+        
+        protected virtual void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                _httpClient.Dispose();
+        
+                // Dispose of the Bitwarden server process
+                if (_serveProcess != null)
+                {
+                    try
+                    {
+                        if (!_serveProcess.HasExited)
+                        {
+                            _serveProcess.Kill();
+                            _serveProcess.WaitForExit(5000); // Wait up to 5 seconds for the process to exit
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("Error while killing Bitwarden server process", ex);
+                    }
+                    finally
+                    {
+                        _serveProcess.Dispose();
+                        _serveProcess = null;
+                    }
+                }
 
+                _initializationLock.Dispose();
+                _autoLockTimer?.Dispose();
+                _iconCacheThrottler.Dispose();
+                if (_clipboardClearTimer != null)
+                {
+                    _clipboardClearTimer.Stop();
+                    _clipboardClearTimer = null;
+                }
+                if (_clientSecret != null)
+                {
+                    _clientSecret.Dispose();
+                }
+                if (_autoLockTimer != null)
+                {
+                    _autoLockTimer.Dispose();
+                    _autoLockTimer = null;
+                }
+            }
+        }
+        
+        public void Dispose()
+        {
+            Dispose(true);
+            GC.SuppressFinalize(this);
+        }
+        
+        private enum QuoteMethod
+        {
+            None,
+            Single,
+            Double
+        }
+
+        private enum ActionType
+        {
+            Default,
+            CopyTotp
+        }
+        
         ~Main()
         {
             Dispose(false);
