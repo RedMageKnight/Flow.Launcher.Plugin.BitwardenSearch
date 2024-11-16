@@ -1,5 +1,21 @@
 <h1>Flow Launcher - Bitwarden Vault Plugin</h1>
 
+#########################################################
+<h2>NOTICE ON DEVELOPMENT DELAYS</h2>
+I greatly appreciate growing interest in the plugin and I appreciate all the helpful responses and requests people have provided. I assure you that I'm reading all of them :) <br><br>
+
+Unfortunately, I've had a lot of life changes happen recently and I'm sort of getting caught up on all that before continuing development on the plugin. Last time I tried working on the plugin to add features and fix some minor issues, it came to my attention that the CLI version at the time was getting heavily caught by various operating system scans and systems as malware and it seriously impeded my development efforts. 
+
+Since then, I believe those issues have been resolved, but then I had to deal with flooding, and moving, and a ton of other things that restricted my access to my primary development machine. Since then, I've been trying to sort all that out and get my development environment back in check.
+
+With all that said, I promise the plugin is not dead - I've been feeling the pain of not being able to use my own plugin since I had to do a device reset on my development machine and haven't had time to set it all back up and I really want it to start working again and use other functions of Flow Launcher as well. I appreciate everyone's patience as I get it all sorted, just know that any difficulty in using the plugin with recent versions of the CLI will be unable to be supported by me at this time, at least until I can get the most recent version of the CLI installed and I can address any of the issues that come with that. 
+
+I've also got to set up a version of Vaultwarden again since I've been getting more requests on that, and since I became annoyed with something regarding my hosting of it and just switched to Bitwarden's hosted instance and I pay for it, I sort of dropped it off my radar.
+
+Thank you again for your patience and for the folks who have been sleuthing the issues section to help members having issues that they can help with. I cannot overstate how thankful I am to y'all for your support with that effort :)
+
+###########################################################<br><br>
+
 This is a Flow Launcher plugin for Bitwarden - an application I like to use for password management. I noticed there wasn't a plugin to provide this functionality, so I thought I'd make one myself.<br><br>
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
