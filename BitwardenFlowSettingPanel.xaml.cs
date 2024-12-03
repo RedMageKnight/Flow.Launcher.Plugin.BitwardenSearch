@@ -11,6 +11,12 @@ using System.Diagnostics;
 using Microsoft.Win32;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.IO.Compression;
+using Newtonsoft.Json.Linq;
+using Newtonsoft.Json;
+using System.Threading;
+using System.Collections.Generic;
 using Flow.Launcher.Plugin.BitwardenSearch;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
@@ -21,6 +27,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private Action<BitwardenFlowSettings>? _updateSettings;
         private bool _isClientSecretModified = false;
         private DispatcherTimer? _resetButtonTimer;
+        private const string BitwardenCliApiUrl = "https://api.github.com/repos/bitwarden/clients/releases";
 
         public BitwardenFlowSettingPanel()
         {
@@ -216,6 +223,195 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             catch (Exception ex)
             {
                 MessageBox.Show($"Failed to update PATH environment variable: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
+        private async Task<string> GetLatestCliVersionUrl()
+        {
+            try
+            {
+                using (var client = new HttpClient())
+                {
+                    client.DefaultRequestHeaders.Add("User-Agent", "Flow.Launcher.Plugin.BitwardenSearch");
+
+                    var releases = await GitHubApiHandler.GetWithRateLimit<JArray>(BitwardenCliApiUrl, client);
+                    
+                    // Find the first release that contains a CLI asset
+                    foreach (var release in releases)
+                    {
+                        var assets = release["assets"] as JArray;
+                        if (assets == null) continue;
+
+                        var cliAsset = assets.FirstOrDefault(a => 
+                            a["name"]?.ToString().StartsWith("bw-windows-") == true && 
+                            a["name"]?.ToString().EndsWith(".zip") == true);
+
+                        if (cliAsset != null)
+                        {
+                            var downloadUrl = cliAsset["browser_download_url"]?.ToString();
+                            if (!string.IsNullOrEmpty(downloadUrl))
+                            {
+                                var version = release["tag_name"]?.ToString() ?? "unknown";
+                                Logger.Log($"Found latest CLI version: {version} at {downloadUrl}", LogLevel.Info);
+                                return downloadUrl;
+                            }
+                        }
+                    }
+
+                    throw new Exception("No valid CLI download URL found in the releases");
+                }
+            }
+            catch (HttpRequestException ex)
+            {
+                Logger.LogError("Error accessing GitHub API", ex);
+                throw new Exception("Failed to access GitHub API. Please check your internet connection.", ex);
+            }
+            catch (JsonException ex)
+            {
+                Logger.LogError("Error parsing GitHub API response", ex);
+                throw new Exception("Failed to parse version information from GitHub.", ex);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Unexpected error fetching latest CLI version", ex);
+                throw new Exception("An unexpected error occurred while checking for the latest version.", ex);
+            }
+        }
+        
+        private async void DownloadCliLink_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                // Show save file dialog for choosing where to save the CLI
+                var saveFileDialog = new SaveFileDialog
+                {
+                    FileName = "bw.exe",
+                    Filter = "Executable files (*.exe)|*.exe",
+                    Title = "Select where to save Bitwarden CLI"
+                };
+
+                if (saveFileDialog.ShowDialog() == true)
+                {
+                    var targetPath = saveFileDialog.FileName;
+                    var targetDirectory = Path.GetDirectoryName(targetPath);
+
+                    if (string.IsNullOrEmpty(targetDirectory))
+                    {
+                        MessageBox.Show("Invalid save location selected.", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                        return;
+                    }
+
+                    // Create a temporary directory for extraction
+                    var tempDir = Path.Combine(Path.GetTempPath(), "BitwardenCLI_" + Guid.NewGuid().ToString());
+                    Directory.CreateDirectory(tempDir);
+                    var zipPath = Path.Combine(tempDir, "bw.zip");
+
+                    try
+                    {
+                        // Show progress dialog
+                        var progressDialog = new Window
+                        {
+                            Title = "Downloading Bitwarden CLI",
+                            Width = 300,
+                            Height = 150,
+                            WindowStartupLocation = WindowStartupLocation.CenterScreen,
+                            ResizeMode = ResizeMode.NoResize,
+                            WindowStyle = WindowStyle.ToolWindow
+                        };
+
+                        var stackPanel = new StackPanel { Margin = new Thickness(10) };
+                        var statusText = new TextBlock 
+                        { 
+                            Text = "Checking for latest version...",
+                            TextWrapping = TextWrapping.Wrap,
+                            Margin = new Thickness(0, 0, 0, 10)
+                        };
+                        var progressBar = new ProgressBar
+                        {
+                            Height = 20,
+                            IsIndeterminate = true
+                        };
+
+                        stackPanel.Children.Add(statusText);
+                        stackPanel.Children.Add(progressBar);
+                        progressDialog.Content = stackPanel;
+                        progressDialog.Show();
+
+                        // Get the latest version URL
+                        statusText.Text = "Fetching latest version information...";
+                        var downloadUrl = await GetLatestCliVersionUrl();
+
+                        // Download the ZIP file
+                        statusText.Text = "Downloading CLI...";
+                        using (var client = new HttpClient())
+                        {
+                            var response = await client.GetAsync(downloadUrl);
+                            response.EnsureSuccessStatusCode();
+
+                            using (var fs = new FileStream(zipPath, FileMode.Create))
+                            {
+                                await response.Content.CopyToAsync(fs);
+                            }
+                        }
+
+                        // Extract the ZIP file
+                        statusText.Text = "Extracting files...";
+                        ZipFile.ExtractToDirectory(zipPath, tempDir);
+
+                        // Find the bw.exe file
+                        var bwExePath = Directory.GetFiles(tempDir, "bw.exe", SearchOption.AllDirectories).FirstOrDefault();
+
+                        if (string.IsNullOrEmpty(bwExePath))
+                        {
+                            throw new FileNotFoundException("bw.exe not found in the downloaded package.");
+                        }
+
+                        // Copy to the target location
+                        statusText.Text = "Installing...";
+                        File.Copy(bwExePath, targetPath, true);
+
+                        // Update the settings
+                        if (_settings != null)
+                        {
+                            _settings.BwExecutablePath = targetPath;
+                            BwExecutablePathTextBox.Text = targetPath;
+                            _updateSettings?.Invoke(_settings);
+                            
+                            // Automatically add to PATH
+                            UpdatePathStatus();
+                            if (!_settings.IsPathEnvironmentValid)
+                            {
+                                AddToPath();
+                            }
+                        }
+
+                        progressDialog.Close();
+
+                        MessageBox.Show("Bitwarden CLI has been successfully downloaded, installed, and added to your PATH.", 
+                            "Installation Complete", MessageBoxButton.OK, MessageBoxImage.Information);
+                    }
+                    finally
+                    {
+                        // Clean up temporary files
+                        try
+                        {
+                            if (Directory.Exists(tempDir))
+                            {
+                                Directory.Delete(tempDir, true);
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Logger.Log($"Error cleaning up temporary files: {ex.Message}", LogLevel.Warning);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Error downloading and installing Bitwarden CLI: {ex.Message}", 
+                    "Installation Error", MessageBoxButton.OK, MessageBoxImage.Error);
+                Logger.LogError("Error during CLI download and installation", ex);
             }
         }
 
