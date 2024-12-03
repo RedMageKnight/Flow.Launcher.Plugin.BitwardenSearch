@@ -62,6 +62,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("isPathEnvironmentValid")]
         public bool IsPathEnvironmentValid { get; set; } = false;
 
+        [JsonProperty("notifyOnAutoLock")]
+        public bool NotifyOnAutoLock { get; set; } = true;
+
         public string GetTranslatedPluginTitle()
         {
             return "Bitwarden Vault";

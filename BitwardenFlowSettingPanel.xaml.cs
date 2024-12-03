@@ -479,6 +479,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     case "NotifyTotpCopyCheckBox":
                         _settings.NotifyOnTotpCopy = checkBox.IsChecked ?? false;
                         break;
+                    case "NotifyAutoLockCheckBox":
+                        _settings.NotifyOnAutoLock = checkBox.IsChecked ?? false;
+                        break;
                 }
                 _updateSettings?.Invoke(_settings);
             }
