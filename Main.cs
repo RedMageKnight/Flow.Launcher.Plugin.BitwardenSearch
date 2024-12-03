@@ -17,7 +17,7 @@ using System.Windows.Input;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
-    public class Main : IAsyncPlugin, ISettingProvider, IDisposable
+    public class Main : IAsyncPlugin, ISettingProvider, IDisposable, IContextMenu
     {
         private readonly HttpClient _httpClient;
         private const string ApiBaseUrl = "http://localhost:8087"; // Bitwarden CLI server URL
@@ -1058,42 +1058,15 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             bool isLocked = await IsVaultLocked();
 
-            if (query.FirstSearch?.ToLower() == "/lock")
+            if (!_isInitialized)
             {
                 return new List<Result>
                 {
                     new Result
                     {
-                        Title = "Lock Bitwarden Vault",
-                        SubTitle = "Press Enter to confirm locking the vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            var lockResults = LockVault();
-                            _context.API.ChangeQuery(""); // Clear the query after locking
-                            return true;
-                        }
-                    }
-                };
-            }
-            else if (query.FirstSearch?.ToLower() == "/sync")
-            {
-                return new List<Result>
-                {
-                    new Result
-                    {
-                        Title = "Sync Bitwarden Vault and Icons",
-                        SubTitle = "Synchronize your vault and cache icons for all items",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            Task.Run(async () =>
-                            {
-                                await SyncVaultAndIcons();
-                                _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
-                            });
-                            return true;
-                        }
+                        Title = "Bitwarden plugin is initializing...",
+                        SubTitle = "Please wait a moment and try again",
+                        IcoPath = "Images/bitwarden.png"
                     }
                 };
             }
@@ -1142,91 +1115,20 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 };
             }
 
-            if (!_isInitialized)
-            {
-                return new List<Result>
-                {
-                    new Result
-                    {
-                        Title = "Bitwarden plugin is initializing...",
-                        SubTitle = "Please wait a moment and try again",
-                        IcoPath = "Images/bitwarden.png"
-                    }
-                };
-            }
-
             // Ensure the server is running before performing a search
             await EnsureServerRunning();
 
             if (string.IsNullOrWhiteSpace(query.Search))
             {
-                var results = new List<Result>
+                return new List<Result>
                 {
                     new Result
                     {
-                        Title = isLocked ? "Bitwarden vault is locked" : "Search Bitwarden",
-                        SubTitle = isLocked ? "Click here or press Enter to enter your password" : "Type to search your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            if (isLocked)
-                            {
-                                Application.Current.Dispatcher.Invoke(() =>
-                                {
-                                    var passwordDialog = new PasswordInputDialog();
-                                    
-                                    if (passwordDialog.ShowDialog() == true)
-                                    {
-                                        string masterPassword = passwordDialog.Password;
-                                        Task.Run(async () =>
-                                        {
-                                            var unlockResults = await UnlockVault(masterPassword);
-                                            if (unlockResults)
-                                            {
-                                                _context.API.ShowMsg("Vault Unlocked", "Your Bitwarden vault has been successfully unlocked.");
-                                            }
-                                            else
-                                            {
-                                                _context.API.ShowMsg("Unlock Failed", "Failed to unlock the vault. Please check your master password and try again.");
-                                            }
-                                            _context.API.ChangeQuery(""); // Clear the query after unlocking attempt
-                                        });
-                                    }
-                                    else
-                                    {
-                                        _context.API.ChangeQuery(""); // Clear the query if canceled
-                                    }
-                                });
-                                return true;
-                            }
-                            return false;
-                        }
-                    },
-                    new Result
-                    {
-                        Title = "/lock",
-                        SubTitle = "Lock your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /lock");
-                            return false;
-                        }
-                    },
-                    new Result
-                    {
-                        Title = "/sync",
-                        SubTitle = "Synchronize your vault and cache icons",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /sync");
-                            return false;
-                        }
+                        Title = "Search Bitwarden",
+                        SubTitle = "Type to search your vault or right-click for more options",
+                        IcoPath = "Images/bitwarden.png"
                     }
                 };
-
-                return results;
             }
 
             // Cancel any previous debounce task
@@ -1807,6 +1709,47 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     _autoLockTimer = null;
                 }
             }
+        }
+
+        public List<Result> LoadContextMenus(Result selectedResult)
+        {
+            // Only show these context menu items for the main Bitwarden entry
+            if (selectedResult.Title == "Search Bitwarden" && 
+                selectedResult.SubTitle == "Type to search your vault or right-click for more options")
+            {
+                return new List<Result>
+                {
+                    new Result
+                    {
+                        Title = "Lock Vault",
+                        SubTitle = "Lock your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            var lockResults = LockVault();
+                            _context.API.ChangeQuery(""); // Clear the query after locking
+                            return true;
+                        }
+                    },
+                    new Result
+                    {
+                        Title = "Sync Vault and Icons",
+                        SubTitle = "Synchronize your vault and cache icons for all items",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            Task.Run(async () =>
+                            {
+                                await SyncVaultAndIcons();
+                                _context.API.ShowMsg("Sync Complete", "Your vault has been synchronized and all icons have been cached.");
+                            });
+                            return true;
+                        }
+                    }
+                };
+            }
+
+            return new List<Result>();
         }
         
         public void Dispose()
