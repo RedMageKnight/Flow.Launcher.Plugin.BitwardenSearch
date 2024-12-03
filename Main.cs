@@ -1076,50 +1076,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
             }
-            else if (query.FirstSearch?.ToLower() == "/unlock" && isLocked)
-            {
-                if (string.IsNullOrEmpty(query.SecondSearch))
-                {
-                    return new List<Result>
-                    {
-                        new Result
-                        {
-                            Title = "Unlock Bitwarden Vault",
-                            SubTitle = "Enter your master password and press Enter to unlock",
-                            IcoPath = "Images/bitwarden.png"
-                        }
-                    };
-                }
-                else
-                {
-                    return new List<Result>
-                    {
-                        new Result
-                        {
-                            Title = "Unlock Bitwarden Vault",
-                            SubTitle = "Press Enter to confirm unlocking with the provided password",
-                            IcoPath = "Images/bitwarden.png",
-                            Action = _ => 
-                            {
-                                Task.Run(async () =>
-                                {
-                                    var unlockResults = await UnlockVault(query.SecondSearch);
-                                    if (unlockResults)
-                                    {
-                                        _context.API.ShowMsg("Vault Unlocked", "Your Bitwarden vault has been successfully unlocked.");
-                                    }
-                                    else
-                                    {
-                                        _context.API.ShowMsg("Unlock Failed", "Failed to unlock the vault. Please check your master password and try again.");
-                                    }
-                                    _context.API.ChangeQuery(""); // Clear the query after unlocking
-                                });
-                                return true;
-                            }
-                        }
-                    };
-                }
-            }
             else if (query.FirstSearch?.ToLower() == "/sync")
             {
                 return new List<Result>
@@ -1150,8 +1106,38 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     new Result
                     {
                         Title = "Bitwarden vault is locked",
-                        SubTitle = "Use 'bw /unlock <password>' to unlock",
-                        IcoPath = "Images/bitwarden.png"
+                        SubTitle = "Click here or press Enter to enter your password",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            Application.Current.Dispatcher.Invoke(() =>
+                            {
+                                var passwordDialog = new PasswordInputDialog();
+                                
+                                if (passwordDialog.ShowDialog() == true)
+                                {
+                                    string masterPassword = passwordDialog.Password;
+                                    Task.Run(async () =>
+                                    {
+                                        var unlockResults = await UnlockVault(masterPassword);
+                                        if (unlockResults)
+                                        {
+                                            _context.API.ShowMsg("Vault Unlocked", "Your Bitwarden vault has been successfully unlocked.");
+                                        }
+                                        else
+                                        {
+                                            _context.API.ShowMsg("Unlock Failed", "Failed to unlock the vault. Please check your master password and try again.");
+                                        }
+                                        _context.API.ChangeQuery(""); // Clear the query after unlocking attempt
+                                    });
+                                }
+                                else
+                                {
+                                    _context.API.ChangeQuery(""); // Clear the query if canceled
+                                }
+                            });
+                            return true;
+                        }
                     }
                 };
             }
@@ -1178,9 +1164,43 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     new Result
                     {
-                        Title = "Search Bitwarden",
-                        SubTitle = "Type to search your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png"
+                        Title = isLocked ? "Bitwarden vault is locked" : "Search Bitwarden",
+                        SubTitle = isLocked ? "Click here or press Enter to enter your password" : "Type to search your Bitwarden vault",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ => 
+                        {
+                            if (isLocked)
+                            {
+                                Application.Current.Dispatcher.Invoke(() =>
+                                {
+                                    var passwordDialog = new PasswordInputDialog();
+                                    
+                                    if (passwordDialog.ShowDialog() == true)
+                                    {
+                                        string masterPassword = passwordDialog.Password;
+                                        Task.Run(async () =>
+                                        {
+                                            var unlockResults = await UnlockVault(masterPassword);
+                                            if (unlockResults)
+                                            {
+                                                _context.API.ShowMsg("Vault Unlocked", "Your Bitwarden vault has been successfully unlocked.");
+                                            }
+                                            else
+                                            {
+                                                _context.API.ShowMsg("Unlock Failed", "Failed to unlock the vault. Please check your master password and try again.");
+                                            }
+                                            _context.API.ChangeQuery(""); // Clear the query after unlocking attempt
+                                        });
+                                    }
+                                    else
+                                    {
+                                        _context.API.ChangeQuery(""); // Clear the query if canceled
+                                    }
+                                });
+                                return true;
+                            }
+                            return false;
+                        }
                     },
                     new Result
                     {
@@ -1205,22 +1225,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         }
                     }
                 };
-
-                // Only add the /unlock option if the vault is locked
-                if (isLocked)
-                {
-                    results.Insert(1, new Result
-                    {
-                        Title = "/unlock",
-                        SubTitle = "Unlock your Bitwarden vault",
-                        IcoPath = "Images/bitwarden.png",
-                        Action = _ => 
-                        {
-                            _context.API.ChangeQuery($"{_context.CurrentPluginMetadata.ActionKeyword} /unlock ");
-                            return false;
-                        }
-                    });
-                }
 
                 return results;
             }
