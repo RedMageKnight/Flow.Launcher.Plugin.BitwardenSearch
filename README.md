@@ -63,9 +63,6 @@ I intend on adding server options to the plugin settings in a future update, but
       <li>Instructions for the API stuff can be found in the plugin settings menu.</li>
     </ul>
     <li>Adjust your desired settings for logging, notifications, vault unlock timeout, and automatic clipboard clearing settings.
-    <li><s>You will need to restart Flow Launcher in order for the credentials in the plugin settings to take effect. This is not required when changing any other setting in the plugin.</s>
-    <ul>
-      <li>This is no longer required! It should immediately start working after you've provided your API credentials.</li>
     </ul>
   </ul>
   <li>Type <code>bw</code> before your search-term to start populating items in your vault.
