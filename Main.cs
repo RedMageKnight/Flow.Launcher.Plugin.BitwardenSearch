@@ -139,6 +139,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 try
                 {
                     await EnsureInitialized();
+                    SetupAutoLockTimer();
                 }
                 catch (Exception ex)
                 {

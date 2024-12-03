@@ -67,10 +67,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             NotifySyncStartCheckBox.IsChecked = _settings.NotifyOnSyncStart;
             NotifyIconCacheStartCheckBox.IsChecked = _settings.NotifyOnIconCacheStart;
             NotifySyncCompleteCheckBox.IsChecked = _settings.NotifyOnSyncComplete;
-
-            // Initialize the auto-lock dropdown
             AutoLockComboBox.SelectedIndex = GetIndexFromDuration(_settings.AutoLockDuration);
-
+            NotifyAutoLockCheckBox.IsChecked = _settings.NotifyOnAutoLock;
             NotifyPasswordCopyCheckBox.IsChecked = _settings.NotifyOnPasswordCopy;
             NotifyUsernameCopyCheckBox.IsChecked = _settings.NotifyOnUsernameCopy;
             NotifyUriCopyCheckBox.IsChecked = _settings.NotifyOnUriCopy;
