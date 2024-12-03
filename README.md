@@ -37,8 +37,7 @@ As of this release (<b>1.3.2</b>), it contains the following capabilities:<br><b
 
 <h2>Requirements</h2>
 In order to use this plugin, you have to have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI downloaded</a>.<br>
-<li>You <b>MUST</b> use any version between 2024.7.2 and 2024.8.2 - the API login process is broken on older versions and 2024.9.0 has binary issues that interfere with the unlock process using the plugin.</li>
-<li><b>NEW</b> - You can now use the settings menu for the plugin to help set your environment variables if you navigate to your bw.exe file on your computer using the included file picker.</li>
+<li>Please ensure you download the latest version as there are login issues with previous versions. If you're not sure where to go, download it direct from the settings screen for the plugin.</li>
 
 <h2>Installation Instructions</h2>
 Install from the Plugin Store from the Flow Launcher settings menu or type the following in Flow Launcher 😊:<br><br>
