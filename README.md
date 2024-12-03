@@ -20,20 +20,20 @@ This is a Flow Launcher plugin for Bitwarden - an application I like to use for 
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
 <h2>Features</h2>
-As of this release (<b>1.3.1</b>), it contains the following capabilities:<br><br>
+As of this release (<b>1.3.2</b>), it contains the following capabilities:<br><br>
 
 1) Fuzzy search across your vault via the bw command with icon population of individual vault items based on the URIs you have saved in your individual vault items.
 2) Icon caching for faster population of visuals.
 3) The ability to copy usernames, passwords, TOTPs, and URI's for each vault item with an expander for URI items in case you have multiple listed that you can select from.
 4) An adjustable log that defaults to showing only Warning and Error messages, but can be expanded to show additional logging from the Flow Launcher settings menu.
-5) Adjustable notification settings for copy settings
-   - **NEW** - Additional adjustable notification settings for sync status</li>
-7) Adjustable vault auto-lock timeouts ranging from letting you keep your vault unlocked, or setting it to lock automatically after however many minutes.
-8) **NEW** - Adjustable clipboard clearing settings that mirror the official Bitwarden client. Defaults to 'None'.
-9) **NEW** - Manual sync - updated a URI for a vault item you don't have an icon for and want to refresh it? Added a new account and want to immediately see it in your search from Flow Launcher? Manually run the <code>/sync</code> command to immediately sync your vault and icons.
+5) Adjustable notification settings for copy settings, auto-lock, and sync operations.
+6) Adjustable vault auto-lock timeouts ranging from letting you keep your vault unlocked, or setting it to lock automatically after however many minutes.
+7) Adjustable clipboard clearing settings that mirror the official Bitwarden client. Defaults to 'None'.
+8) Manual sync - updated a URI for a vault item you don't have an icon for and want to refresh it? Added a new account and want to immediately see it in your search from Flow Launcher? Manually run the <code>/sync</code> command to immediately sync your vault and icons.
     - This also occurs after each unlock asynchronously with the unlock process so there shouldn't be any delay beyond the initial unlock.
-9) **NEW** - CLI setting assist now exists in the plugin settings. Just download the CLI into a location of your choosing and use the file picker in the plugin settings to point to it and set your user PATH variable to include this PATH automatically. No more hunting around in Windows settings yourself to set this stuff.
+9) CLI setting assist now exists in the plugin settings. Just download the CLI into a location of your choosing and use the file picker in the plugin settings to point to it and set your user PATH variable to include this PATH automatically. No more hunting around in Windows settings yourself to set this stuff.
     - Even if you've already done this process in previous versions, it is advised to still point to your bw.exe file in the plugin settings. It will automatically detect if you've already added it to your PATH variable in either SYSTEM or USER settings.
+    - **NEW** - Can now download the CLI directly from the settings screen, which will automatically extract to a location of your choice, and add the PATH variables accordingly if they're not already there.
 
 <h2>Requirements</h2>
 In order to use this plugin, you have to have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI downloaded</a>.<br>
