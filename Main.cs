@@ -42,6 +42,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private DateTime _lastLockCheckTime = DateTime.MinValue;
         private static readonly TimeSpan LockCheckCooldown = TimeSpan.FromSeconds(5);
         private SemaphoreSlim _iconCacheThrottler = new SemaphoreSlim(5);
+        private VaultItemCache? _vaultItemCache;
 
         public Main()
         {
@@ -69,6 +70,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     Logger.Log($"Failed to create favicon cache directory: {ex.Message}", LogLevel.Error);
                     _faviconCacheDir = null;
+                }
+                var vaultCacheDir = Path.Combine(assemblyDirectory, "VaultItemCache");
+                try
+                {
+                    Directory.CreateDirectory(vaultCacheDir);
+                    _vaultItemCache = new VaultItemCache(vaultCacheDir);
+                    Logger.Log($"Vault item cache directory created: {vaultCacheDir}", LogLevel.Info);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Log($"Failed to create vault item cache directory: {ex.Message}", LogLevel.Error);
                 }
             }
             else
@@ -1226,6 +1238,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     _context.API.ShowMsg("Sync Started", "Beginning full sync of vault and icons. This may take a while.");
                 }
 
+                // Clear the vault cache before syncing
+                _vaultItemCache?.ClearCache();
+
                 // Step 1: Sync the vault
                 Logger.Log("Starting vault synchronization", LogLevel.Info);
                 var syncResponse = await _httpClient.PostAsync($"{ApiBaseUrl}/sync", null);
@@ -1291,6 +1306,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     Logger.Log("IconCacheManager is not initialized", LogLevel.Warning);
                     _context.API.ShowMsg("Icon Sync Incomplete", "Vault synced successfully, but icon caching could not be performed.");
+                }
+
+                // Step 4: Update vault cache
+                if (_vaultItemCache != null && items.Any())
+                {
+                    _vaultItemCache.UpdateCache(items);
                 }
             }
             catch (Exception ex)
@@ -1371,9 +1392,21 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 else
                 {
-                    Logger.Log($"Copying password for item: {item.name}", LogLevel.Debug);
-                    CopyToClipboard(item.login?.password, "Password");
-                    return true;
+                    // For password copying, we need to fetch the full item from the CLI
+                    Logger.Log($"Fetching full item for password copy: {item.name}", LogLevel.Debug);
+                    var fullItem = await GetFullItemFromCli(item.id);
+                    if (fullItem != null && fullItem.login?.password != null)
+                    {
+                        Logger.Log($"Copying password for item: {item.name}", LogLevel.Debug);
+                        CopyToClipboard(fullItem.login.password, "Password");
+                        return true;
+                    }
+                    else
+                    {
+                        Logger.Log($"Failed to fetch password for item: {item.name}", LogLevel.Error);
+                        _context.API.ShowMsg("Error", "Failed to fetch password from vault.");
+                        return false;
+                    }
                 }
             }
             catch (Exception ex)
@@ -1381,6 +1414,41 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.LogError($"Error in HandleItemAction for {actionType} on item {item.name}", ex);
                 _context.API.ShowMsg("Error", $"An error occurred while performing the action for {item.name}. Check logs for details.");
                 return false;
+            }
+        }
+
+        private async Task<BitwardenItem?> GetFullItemFromCli(string itemId)
+        {
+            try
+            {
+                if (_serveProcess == null || _serveProcess.HasExited)
+                {
+                    Logger.Log("Bitwarden server is not running. Attempting to start...", LogLevel.Warning);
+                    await StartBitwardenServer();
+                }
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/object/item/{itemId}");
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<JObject>(content);
+                    var itemData = result?["data"]?.ToString();
+                    
+                    if (!string.IsNullOrEmpty(itemData))
+                    {
+                        return JsonConvert.DeserializeObject<BitwardenItem>(itemData);
+                    }
+                }
+                
+                Logger.Log($"Failed to fetch full item. Status code: {response.StatusCode}", LogLevel.Error);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error fetching full item from CLI", ex);
+                return null;
             }
         }
 
@@ -1474,6 +1542,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return new List<BitwardenItem>();
                 }
 
+                // First try to search the cache
+                if (_vaultItemCache != null && _vaultItemCache.IsCacheValid())
+                {
+                    var cachedResults = _vaultItemCache.SearchCache(searchTerm);
+                    if (cachedResults.Any())
+                    {
+                        Logger.Log($"Found {cachedResults.Count} results in cache for search term: {searchTerm}", LogLevel.Debug);
+                        return cachedResults;
+                    }
+                }
+
                 var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -1506,6 +1585,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     Logger.Log($"Deserialized item {item.name} - TOTP status: hasTotp={item.hasTotp}, " +
                             $"login null={item.login == null}", LogLevel.Debug);
+                }
+
+                // Update cache with new results
+                if (_vaultItemCache != null && items.Any())
+                {
+                    _vaultItemCache.UpdateCache(items);
                 }
 
                 return items;
@@ -1777,7 +1862,37 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     IcoPath = "Images/bitwarden.png",
                     Action = _ =>
                     {
-                        CopyToClipboard(item.login?.password, "Password");
+                        // Start the async operation but don't wait for it
+                        Task.Run(async () =>
+                        {
+                            try
+                            {
+                                var fullItem = await GetFullItemFromCli(item.id);
+                                if (fullItem != null && fullItem.login?.password != null)
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        CopyToClipboard(fullItem.login.password, "Password");
+                                    });
+                                }
+                                else
+                                {
+                                    Application.Current.Dispatcher.Invoke(() =>
+                                    {
+                                        _context.API.ShowMsg("Error", "Failed to fetch password from vault.");
+                                    });
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Logger.LogError("Error copying password from context menu", ex);
+                                Application.Current.Dispatcher.Invoke(() =>
+                                {
+                                    _context.API.ShowMsg("Error", "Failed to copy password. Check logs for details.");
+                                });
+                            }
+                        });
+
                         return true;
                     }
                 });
