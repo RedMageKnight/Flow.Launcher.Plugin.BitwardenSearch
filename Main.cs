@@ -1165,12 +1165,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     var item = items[index];
                     var resultId = item.id;
                     Logger.Log($"Creating result for item: {item.name} with ID: {resultId} at index: {index}", LogLevel.Debug);
+                    Logger.Log($"Creating result for {item.name} - HasTotp: {item.hasTotp}, URIs count: {item.login?.uris?.Count ?? 0}", LogLevel.Debug);
                     var result = new Result
                     {
                         Title = item.name,
                         SubTitle = BuildSubTitle(item),
                         IcoPath = "Images/bitwarden.png",
                         ActionKeywordAssigned = resultId,
+                        ContextData = item,
                         Score = items.Count - index,
                         Action = context => 
                         {
@@ -1499,7 +1501,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return new List<BitwardenItem>();
                 }
 
-                return JsonConvert.DeserializeObject<List<BitwardenItem>>(output) ?? new List<BitwardenItem>();
+                var items = JsonConvert.DeserializeObject<List<BitwardenItem>>(output) ?? new List<BitwardenItem>();
+                foreach (var item in items)
+                {
+                    Logger.Log($"Deserialized item {item.name} - TOTP status: hasTotp={item.hasTotp}, " +
+                            $"login null={item.login == null}", LogLevel.Debug);
+                }
+
+                return items;
             }
             catch (Exception ex)
             {
@@ -1713,10 +1722,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public List<Result> LoadContextMenus(Result selectedResult)
         {
-            // Only show these context menu items for the main Bitwarden entry
+            Logger.Log($"LoadContextMenus called for result: {selectedResult.Title}", LogLevel.Debug);
+
+            // Context menu for main Bitwarden entry
             if (selectedResult.Title == "Search Bitwarden" && 
                 selectedResult.SubTitle == "Type to search your vault or right-click for more options")
             {
+                Logger.Log("Showing main Bitwarden context menu", LogLevel.Debug);
                 return new List<Result>
                 {
                     new Result
@@ -1749,6 +1761,83 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 };
             }
 
+            // Context menu for individual vault items
+            if (selectedResult.ContextData is BitwardenItem item)
+            {
+                Logger.Log($"Found vault item: {item.name}", LogLevel.Debug);
+                Logger.Log($"Item details - HasTotp: {item.hasTotp}, Login null: {item.login == null}, URIs count: {item.login?.uris?.Count ?? 0}", LogLevel.Debug);
+                
+                var contextMenuItems = new List<Result>();
+
+                // Password option
+                contextMenuItems.Add(new Result
+                {
+                    Title = "Copy Password",
+                    SubTitle = "Copy the password to clipboard",
+                    IcoPath = "Images/bitwarden.png",
+                    Action = _ =>
+                    {
+                        CopyToClipboard(item.login?.password, "Password");
+                        return true;
+                    }
+                });
+
+                // Username option (if available)
+                if (!string.IsNullOrEmpty(item.login?.username))
+                {
+                    contextMenuItems.Add(new Result
+                    {
+                        Title = "Copy Username",
+                        SubTitle = $"Copy the username ({item.login.username}) to clipboard",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ =>
+                        {
+                            CopyToClipboard(item.login.username, "Username");
+                            return true;
+                        }
+                    });
+                }
+
+                // TOTP option (if available)
+                Logger.Log($"Checking TOTP availability for {item.name}: {item.hasTotp}", LogLevel.Debug);
+                if (item.hasTotp)
+                {
+                    Logger.Log($"Adding TOTP option for {item.name}", LogLevel.Debug);
+                    contextMenuItems.Add(new Result
+                    {
+                        Title = "Copy TOTP Code",
+                        SubTitle = "Copy the current TOTP code to clipboard",
+                        IcoPath = "Images/totp.png",
+                        Action = _ =>
+                        {
+                            Task.Run(() => CopyTotpCode(item));
+                            return true;
+                        }
+                    });
+                }
+
+                // URIs option (if available)
+                if (item.login?.uris != null && item.login.uris.Any())
+                {
+                    Logger.Log($"Adding URIs option for {item.name} ({item.login.uris.Count} URIs)", LogLevel.Debug);
+                    contextMenuItems.Add(new Result
+                    {
+                        Title = "Show URIs",
+                        SubTitle = $"Show and copy available URIs ({item.login.uris.Count} available)",
+                        IcoPath = "Images/bitwarden.png",
+                        Action = _ =>
+                        {
+                            Application.Current.Dispatcher.Invoke(() => ShowUriListPopup(item));
+                            return true;
+                        }
+                    });
+                }
+
+                Logger.Log($"Returning {contextMenuItems.Count} context menu items for vault item", LogLevel.Debug);
+                return contextMenuItems;
+            }
+
+            Logger.Log("No context menu items found for this result", LogLevel.Debug);
             return new List<Result>();
         }
         
@@ -1782,7 +1871,27 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public string id { get; set; } = string.Empty;
         public string name { get; set; } = string.Empty;
         public BitwardenLogin? login { get; set; }
-        public bool? hasTotp { get; set; }
+        
+        [JsonProperty("hasTotp")]
+        private bool? _rawHasTotp;
+
+        [JsonIgnore]
+        public bool hasTotp 
+        {
+            get
+            {
+                // Check both the raw property and the login.totp field
+                if (_rawHasTotp.HasValue)
+                    return _rawHasTotp.Value;
+                
+                // If login exists and has a non-null totp field, consider it as having TOTP
+                if (login?.totp != null)
+                    return true;
+
+                return false;
+            }
+            set => _rawHasTotp = value;
+        }
     }
 
     public class BitwardenLogin
@@ -1790,6 +1899,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public string? username { get; set; }
         public string? password { get; set; }
         public List<BitwardenUri>? uris { get; set; }
+        public string? totp { get; set; } 
     }
 
     public class BitwardenUri
