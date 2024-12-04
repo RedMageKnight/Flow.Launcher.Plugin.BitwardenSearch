@@ -848,13 +848,20 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
             }
 
+            // Verify we have a session key before starting the server
+            if (string.IsNullOrEmpty(_settings.SessionKey))
+            {
+                Logger.Log("No valid session key available. Cannot start server.", LogLevel.Error);
+                throw new Exception("No valid session key available");
+            }
+
             Logger.Log("Starting Bitwarden server", LogLevel.Info);
             _serveProcess = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "bw",
-                    Arguments = $"serve --session {_settings.SessionKey}",
+                    Arguments = $"serve --session \"{_settings.SessionKey}\"", // Added quotes around session key
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
@@ -862,8 +869,16 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
             };
 
-            _serveProcess.OutputDataReceived += (sender, e) => Logger.Log($"Bitwarden server output: {e.Data}", LogLevel.Debug);
-            _serveProcess.ErrorDataReceived += (sender, e) => Logger.Log($"Bitwarden server error: {e.Data}", LogLevel.Error);
+            _serveProcess.OutputDataReceived += (sender, e) => 
+            {
+                if (!string.IsNullOrEmpty(e.Data))
+                    Logger.Log($"Bitwarden server output: {e.Data}", LogLevel.Debug);
+            };
+            _serveProcess.ErrorDataReceived += (sender, e) => 
+            {
+                if (!string.IsNullOrEmpty(e.Data))
+                    Logger.Log($"Bitwarden server error: {e.Data}", LogLevel.Error);
+            };
 
             try
             {
@@ -872,15 +887,17 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 _serveProcess.BeginOutputReadLine();
                 _serveProcess.BeginErrorReadLine();
 
-                Logger.Log("Waiting for Bitwarden server to initialize", LogLevel.Debug);
-                await Task.Delay(5000);
+                // Give the server a moment to start
+                await Task.Delay(2000);
 
                 // Check if the server is responsive
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
                 for (int i = 0; i < 5; i++)
                 {
                     try
                     {
-                        var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
+                        using var testClient = new HttpClient();
+                        var response = await testClient.GetAsync($"{ApiBaseUrl}/status", cts.Token);
                         if (response.IsSuccessStatusCode)
                         {
                             Logger.Log("Bitwarden server started successfully", LogLevel.Info);
@@ -889,10 +906,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                     catch (Exception ex)
                     {
-                        Logger.Log($"Error checking server status: {ex.Message}", LogLevel.Warning);
+                        Logger.Log($"Attempt {i + 1}/5: Error checking server status: {ex.Message}", LogLevel.Warning);
                     }
 
-                    await Task.Delay(1000);
+                    if (i < 4) // Don't delay on the last attempt
+                        await Task.Delay(1000, cts.Token);
                 }
 
                 Logger.Log("Failed to start Bitwarden server", LogLevel.Error);
@@ -1802,6 +1820,36 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     _autoLockTimer.Dispose();
                     _autoLockTimer = null;
                 }
+            }
+        }
+
+        private async Task RestartBitwardenServer()
+        {
+            try
+            {
+                if (_serveProcess != null)
+                {
+                    if (!_serveProcess.HasExited)
+                    {
+                        _serveProcess.Kill();
+                        await _serveProcess.WaitForExitAsync();
+                    }
+                    _serveProcess.Dispose();
+                    _serveProcess = null;
+                }
+
+                // Clear the session key when restarting server
+                _settings.SessionKey = string.Empty;
+                _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
+                _isLocked = true;
+                UpdateHttpClientAuthorization();
+
+                // Wait a moment before attempting to start the server again
+                await Task.Delay(1000);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error during Bitwarden server restart", ex);
             }
         }
 

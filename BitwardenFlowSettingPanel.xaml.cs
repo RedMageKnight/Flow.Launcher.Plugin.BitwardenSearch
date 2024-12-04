@@ -80,6 +80,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             // Initialize the clipboard clear combo box
             ClipboardClearComboBox.SelectedIndex = GetIndexFromSeconds(_settings.ClipboardClearSeconds);
+
+            InitializeServerConfig();
         }
 
         private void AutoLockComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -491,20 +493,80 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 _settings.ClientId = ClientIdTextBox.Text;
                 _updateSettings?.Invoke(_settings);
+                
+                // Enable save button only if both fields have content
+                SaveClientSecretButton.IsEnabled = !string.IsNullOrEmpty(ClientIdTextBox.Text) && 
+                                                !string.IsNullOrEmpty(ClientSecretBox.Password) &&
+                                                ClientSecretBox.Password != "********";
             }
         }
 
         private void ClientSecretBox_PasswordChanged(object sender, RoutedEventArgs e)
         {
             _isClientSecretModified = true;
-            SaveClientSecretButton.IsEnabled = true;
-            SaveClientSecretButton.Content = "Save Secret";
-            SaveClientSecretButton.Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#007bff"));
+            
+            // Enable save button only if both fields have content
+            SaveClientSecretButton.IsEnabled = !string.IsNullOrEmpty(ClientIdTextBox.Text) && 
+                                            !string.IsNullOrEmpty(ClientSecretBox.Password);
         }
 
-        private void SaveClientSecretButton_Click(object sender, RoutedEventArgs e)
+        private async void SaveClientSecretButton_Click(object sender, RoutedEventArgs e)
         {
+            if (_settings == null) return;
+
+            if (string.IsNullOrEmpty(ClientIdTextBox.Text) || string.IsNullOrEmpty(ClientSecretBox.Password))
+            {
+                if (ServerConfigStatusTextBlock != null)
+                {
+                    ServerConfigStatusTextBlock.Text = "Both Client ID and Client Secret are required.";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                }
+                return;
+            }
+
             SaveClientSecret();
+
+            // Now attempt to verify the credentials
+            try 
+            {
+                var secureSecret = SecureCredentialManager.RetrieveCredential(_settings.ClientId);
+                if (secureSecret == null)
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Failed to retrieve saved credentials.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                    }
+                    return;
+                }
+
+                var loginSuccess = await BitwardenAuthService.LoginWithApiKey(_settings.ClientId, secureSecret);
+                if (loginSuccess)
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "API credentials verified successfully.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Green;
+                    }
+                }
+                else
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Failed to verify API credentials. Please check your Client ID and Secret.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error verifying API credentials", ex);
+                if (ServerConfigStatusTextBlock != null)
+                {
+                    ServerConfigStatusTextBlock.Text = $"Error verifying API credentials: {ex.Message}";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                }
+            }
         }
 
         private void SaveClientSecret()
@@ -588,6 +650,209 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 300 => 6,
                 _ => 0
             };
+        }
+
+        private async void UseCustomServerCheckBox_Changed(object sender, RoutedEventArgs e)
+        {
+            if (_settings == null || _updateSettings == null) return;
+
+            _settings.UseCustomServer = UseCustomServerCheckBox?.IsChecked ?? false;
+            if (ServerConfigPanel != null)
+            {
+                ServerConfigPanel.Visibility = _settings.UseCustomServer ? Visibility.Visible : Visibility.Collapsed;
+            }
+
+            // Clear credentials when switching servers
+            if (ClientIdTextBox != null)
+            {
+                ClientIdTextBox.Text = string.Empty;
+                _settings.ClientId = string.Empty;
+            }
+            
+            if (ClientSecretBox != null)
+            {
+                ClientSecretBox.Password = string.Empty;
+            }
+
+            // Clear any stored credentials
+            try
+            {
+                SecureCredentialManager.DeleteCredential();
+                Logger.Log("Cleared stored credentials", LogLevel.Debug);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error clearing stored credentials", ex);
+            }
+
+            if (_settings.UseCustomServer)
+            {
+                if (ServerConfigStatusTextBlock != null)
+                {
+                    ServerConfigStatusTextBlock.Text = "Note: You will need to provide new API credentials for this server.";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Gray;
+                }
+
+                // Try to load existing server configuration
+                var currentServerUrl = await BitwardenCliConfigManager.GetCurrentServerUrl();
+                if (!string.IsNullOrEmpty(currentServerUrl) && currentServerUrl != BitwardenConstants.DEFAULT_SERVER_URL)
+                {
+                    if (BaseUrlTextBox != null) BaseUrlTextBox.Text = currentServerUrl;
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Existing server configuration loaded. Please provide API credentials for this server.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Green;
+                    }
+                }
+            }
+            else
+            {
+                if (ServerConfigStatusTextBlock != null)
+                {
+                    ServerConfigStatusTextBlock.Text = "Resetting to default server...";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Gray;
+                }
+
+                var config = new BitwardenCliConfig { BaseUrl = null };
+                var success = await BitwardenCliConfigManager.ConfigureServer(config);
+                
+                if (success)
+                {
+                    ClearServerConfigFields();
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Reset to default Bitwarden server. You will need to log in again.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Green;
+                    }
+                }
+                else
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Failed to reset to default server. Please try logging out manually.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                    }
+                }
+            }
+
+            _updateSettings.Invoke(_settings);
+        }
+
+        private void ServerConfig_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_settings == null || _updateSettings == null) return;
+
+            if (BaseUrlTextBox != null) _settings.CustomServerUrl = BaseUrlTextBox.Text;
+            if (IdentityUrlTextBox != null) _settings.CustomIdentityUrl = IdentityUrlTextBox.Text;
+            if (ApiUrlTextBox != null) _settings.CustomApiUrl = ApiUrlTextBox.Text;
+            if (NotificationsUrlTextBox != null) _settings.CustomNotificationsUrl = NotificationsUrlTextBox.Text;
+            if (WebVaultUrlTextBox != null) _settings.CustomWebVaultUrl = WebVaultUrlTextBox.Text;
+            if (IconsUrlTextBox != null) _settings.CustomIconsUrl = IconsUrlTextBox.Text;
+            if (KeysUrlTextBox != null) _settings.CustomKeysUrl = KeysUrlTextBox.Text;
+
+            _updateSettings.Invoke(_settings);
+            
+            // Enable apply button only if base URL is provided
+            if (ApplyServerConfigButton != null && BaseUrlTextBox != null)
+            {
+                ApplyServerConfigButton.IsEnabled = !string.IsNullOrWhiteSpace(BaseUrlTextBox.Text);
+            }
+        }
+
+        private async void ApplyServerConfigButton_Click(object sender, RoutedEventArgs e)
+        {
+            if (BaseUrlTextBox == null || ServerConfigStatusTextBlock == null || ApplyServerConfigButton == null) return;
+
+            if (string.IsNullOrWhiteSpace(BaseUrlTextBox.Text))
+            {
+                ServerConfigStatusTextBlock.Text = "Base URL is required";
+                ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                return;
+            }
+
+            var config = new BitwardenCliConfig
+            {
+                BaseUrl = BaseUrlTextBox.Text,
+                IdentityUrl = IdentityUrlTextBox?.Text,
+                ApiUrl = ApiUrlTextBox?.Text,
+                NotificationsUrl = NotificationsUrlTextBox?.Text,
+                WebVaultUrl = WebVaultUrlTextBox?.Text,
+                IconsUrl = IconsUrlTextBox?.Text,
+                KeysUrl = KeysUrlTextBox?.Text
+            };
+
+            ApplyServerConfigButton.IsEnabled = false;
+            ServerConfigStatusTextBlock.Text = "Applying server configuration...";
+            ServerConfigStatusTextBlock.Foreground = Brushes.Gray;
+
+            try
+            {
+                bool success = await BitwardenCliConfigManager.ConfigureServer(config);
+                if (success)
+                {
+                    ServerConfigStatusTextBlock.Text = "Server configuration applied successfully";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Green;
+                }
+                else
+                {
+                    ServerConfigStatusTextBlock.Text = "Failed to apply server configuration";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                }
+            }
+            catch (Exception ex)
+            {
+                ServerConfigStatusTextBlock.Text = $"Error: {ex.Message}";
+                ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                Logger.LogError("Failed to apply server configuration", ex);
+            }
+            finally
+            {
+                ApplyServerConfigButton.IsEnabled = true;
+            }
+        }
+
+        private void ClearServerConfigFields()
+        {
+            if (BaseUrlTextBox != null) BaseUrlTextBox.Text = string.Empty;
+            if (IdentityUrlTextBox != null) IdentityUrlTextBox.Text = string.Empty;
+            if (ApiUrlTextBox != null) ApiUrlTextBox.Text = string.Empty;
+            if (NotificationsUrlTextBox != null) NotificationsUrlTextBox.Text = string.Empty;
+            if (WebVaultUrlTextBox != null) WebVaultUrlTextBox.Text = string.Empty;
+            if (IconsUrlTextBox != null) IconsUrlTextBox.Text = string.Empty;
+            if (KeysUrlTextBox != null) KeysUrlTextBox.Text = string.Empty;
+            if (ServerConfigStatusTextBlock != null) ServerConfigStatusTextBlock.Text = string.Empty;
+        }
+
+        private void InitializeServerConfig()
+        {
+            if (_settings == null || UseCustomServerCheckBox == null || ServerConfigPanel == null) return;
+
+            UseCustomServerCheckBox.IsChecked = _settings.UseCustomServer;
+            if (_settings.UseCustomServer)
+            {
+                ServerConfigPanel.Visibility = Visibility.Visible;
+
+                if (BaseUrlTextBox != null)
+                    BaseUrlTextBox.Text = _settings.CustomServerUrl;
+                    
+                if (IdentityUrlTextBox != null)
+                    IdentityUrlTextBox.Text = _settings.CustomIdentityUrl;
+                    
+                if (ApiUrlTextBox != null)
+                    ApiUrlTextBox.Text = _settings.CustomApiUrl;
+                    
+                if (NotificationsUrlTextBox != null)
+                    NotificationsUrlTextBox.Text = _settings.CustomNotificationsUrl;
+                    
+                if (WebVaultUrlTextBox != null)
+                    WebVaultUrlTextBox.Text = _settings.CustomWebVaultUrl;
+                    
+                if (IconsUrlTextBox != null)
+                    IconsUrlTextBox.Text = _settings.CustomIconsUrl;
+                    
+                if (KeysUrlTextBox != null)
+                    KeysUrlTextBox.Text = _settings.CustomKeysUrl;
+            }
         }
     }
 }

@@ -17,6 +17,30 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("sessionKey")]
         public string SessionKey { get; set; } = string.Empty;
 
+        [JsonProperty("useCustomServer")]
+        public bool UseCustomServer { get; set; } = false;
+
+        [JsonProperty("customServerUrl")]
+        public string CustomServerUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customIdentityUrl")]
+        public string CustomIdentityUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customApiUrl")]
+        public string CustomApiUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customNotificationsUrl")]
+        public string CustomNotificationsUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customWebVaultUrl")]
+        public string CustomWebVaultUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customIconsUrl")]
+        public string CustomIconsUrl { get; set; } = string.Empty;
+
+        [JsonProperty("customKeysUrl")]
+        public string CustomKeysUrl { get; set; } = string.Empty;
+
         [JsonProperty("logTrace")]
         public bool LogTrace { get; set; } = false;
 
@@ -33,8 +57,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public bool LogError { get; set; } = true;
 
         [JsonProperty("autoLockDuration")]
-        public int AutoLockDuration { get; set; } = 0; // 0 represents "Never"
-        
+        public int AutoLockDuration { get; set; } = 0;
+
         [JsonProperty("notifyOnPasswordCopy")]
         public bool NotifyOnPasswordCopy { get; set; } = false;
 
@@ -57,7 +81,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public bool NotifyOnSyncComplete { get; set; } = true;
 
         [JsonProperty("clipboardClearSeconds")]
-        public int ClipboardClearSeconds { get; set; } = 0; // 0 means never clear
+        public int ClipboardClearSeconds { get; set; } = 0;
 
         [JsonProperty("isPathEnvironmentValid")]
         public bool IsPathEnvironmentValid { get; set; } = false;
