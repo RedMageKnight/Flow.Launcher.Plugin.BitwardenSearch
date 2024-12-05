@@ -86,7 +86,7 @@ Install from the Plugin Store from the Flow Launcher settings menu or type the f
     <img src="/screenshots/Flow.Launcher_RtNvIxkhtk.png" width="400px"</img> 
     <p>Flow Launcher plugin settings screen.</p>
 </div>
-<div alight="center">
+<div align="center">
    <img src="/screenshots/Flow.Launcher_jzUEnY2LBl.png" width="400px"</img>
    <p>Context menu for vault item example.</p>
 </div>
