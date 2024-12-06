@@ -4,7 +4,7 @@ This is a Flow Launcher plugin for Bitwarden - an application I like to use for 
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
 <h2>Features</h2>
-As of this release (<b>2.0.0</b>), it contains the following capabilities:<br><br>
+As of this release (<b>2.1.0</b>), it contains the following capabilities:<br><br>
 
 1) Search across your entire vault from within Flow Launcher.
    - Icon population for each vault item if you have a URL associated with that item and it resolves and can produce a favicon.
@@ -19,6 +19,7 @@ As of this release (<b>2.0.0</b>), it contains the following capabilities:<br><b
    - Adjust notifications for vault item copying actions, sync actions, auto-lock, etc. from within the plugin settings.
 6) Automatic download, extraction, and configuration of the Bitwarden CLI to a place of your choosing and will configure your PATH variables for you.
 7) Shortcut and context menu support - can use keyboard shortcuts to perform copy actions or use Flow Launcher's built-in context menus on your vault items to copy what you want.
+8) Re-prompt for master password on vault items configured for it.
 
 <h2>Requirements</h2>
 In order to use this plugin, you have to have the <a href="https://bitwarden.com/help/cli/#download-and-install">Bitwarden CLI downloaded</a>.<br>

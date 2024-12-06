@@ -14,6 +14,7 @@ using Newtonsoft.Json;
 using System.Security;
 using System.Net.Sockets;
 using System.Windows.Input;
+using System.Runtime.InteropServices;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -463,14 +464,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             _isLocked = true;
             _settings.SessionKey = string.Empty;
+            ClearEnvironmentSessionKey();
+            SecureMasterPasswordVerifier.ClearStoredHash();
             _context.API.SaveSettingJsonStorage<BitwardenFlowSettings>();
             UpdateHttpClientAuthorization();
-
-            if (_autoLockTimer != null)
-            {
-                _autoLockTimer.Dispose();
-                _autoLockTimer = null;
-            }
 
             return new List<Result>
             {
@@ -505,6 +502,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         Logger.Log("Vault successfully unlocked", LogLevel.Info);
                         SetupAutoLockTimer();
                         ResetAutoLockTimer();
+                        
+                        // Store the hash for future verification
+                        SecureMasterPasswordVerifier.StoreMasterPasswordHash(masterPassword, _settings.ClientId);
+                        
                         await SyncVaultAndIcons();
                         return true;
                     }
@@ -1361,11 +1362,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 Task.Run(async () =>
                 {
-                    bool success = await HandleItemAction(extendedContext, item, actionType);
-                    if (!success)
-                    {
-                        _context.API.ShowMsg("Action Failed", $"Failed to perform {actionType} action for {item.name}.");
-                    }
+                    await HandleItemAction(extendedContext, item, actionType);
                 });
                 return true;
             }
@@ -1410,21 +1407,8 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 else
                 {
-                    // For password copying, we need to fetch the full item from the CLI
-                    Logger.Log($"Fetching full item for password copy: {item.name}", LogLevel.Debug);
-                    var fullItem = await GetFullItemFromCli(item.id);
-                    if (fullItem != null && fullItem.login?.password != null)
-                    {
-                        Logger.Log($"Copying password for item: {item.name}", LogLevel.Debug);
-                        CopyToClipboard(fullItem.login.password, "Password");
-                        return true;
-                    }
-                    else
-                    {
-                        Logger.Log($"Failed to fetch password for item: {item.name}", LogLevel.Error);
-                        _context.API.ShowMsg("Error", "Failed to fetch password from vault.");
-                        return false;
-                    }
+                    Logger.Log($"Attempting password copy for item: {item.name}, reprompt value: {item.reprompt}", LogLevel.Debug);
+                    return await HandlePasswordCopy(item);
                 }
             }
             catch (Exception ex)
@@ -1910,37 +1894,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     IcoPath = "Images/bitwarden.png",
                     Action = _ =>
                     {
-                        // Start the async operation but don't wait for it
-                        Task.Run(async () =>
-                        {
-                            try
-                            {
-                                var fullItem = await GetFullItemFromCli(item.id);
-                                if (fullItem != null && fullItem.login?.password != null)
-                                {
-                                    Application.Current.Dispatcher.Invoke(() =>
-                                    {
-                                        CopyToClipboard(fullItem.login.password, "Password");
-                                    });
-                                }
-                                else
-                                {
-                                    Application.Current.Dispatcher.Invoke(() =>
-                                    {
-                                        _context.API.ShowMsg("Error", "Failed to fetch password from vault.");
-                                    });
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Logger.LogError("Error copying password from context menu", ex);
-                                Application.Current.Dispatcher.Invoke(() =>
-                                {
-                                    _context.API.ShowMsg("Error", "Failed to copy password. Check logs for details.");
-                                });
-                            }
-                        });
-
+                        Task.Run(async () => await HandlePasswordCopy(item));
                         return true;
                     }
                 });
@@ -2003,6 +1957,167 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log("No context menu items found for this result", LogLevel.Debug);
             return new List<Result>();
         }
+
+        private async Task<bool> VerifyMasterPassword(string itemName)
+        {
+            bool verified = false;
+            await Application.Current.Dispatcher.InvokeAsync(() =>
+            {
+                var passwordDialog = new PasswordInputDialog
+                {
+                    Title = "Verify Master Password"
+                };
+                
+                if (passwordDialog.ShowDialog() == true)
+                {
+                    verified = SecureMasterPasswordVerifier.VerifyMasterPassword(
+                        passwordDialog.Password, 
+                        _settings.ClientId
+                    );
+                    
+                    if (!verified)
+                    {
+                        _context.API.ShowMsg(
+                            "Access Denied", 
+                            $"Incorrect master password for {itemName}. The password was not copied."
+                        );
+                    }
+
+                    // Clear the password from memory
+                    Array.Clear(passwordDialog.Password.ToCharArray(), 0, passwordDialog.Password.Length);
+                }
+            });
+
+            return verified;
+        }
+
+        private async Task<bool> HandlePasswordCopy(BitwardenItem item)
+        {
+            try
+            {
+                // Check for reprompt
+                if (item.reprompt == 1)
+                {
+                    Logger.Log($"Reprompt required for item: {item.name}, reprompt value: {item.reprompt}", LogLevel.Debug);
+                    var passwordVerified = await VerifyMasterPassword(item.name);
+                    if (!passwordVerified)
+                    {
+                        return false;
+                    }
+                }
+
+                // Get password securely
+                var password = await GetSecurePasswordFromCli(item.id);
+                if (password != null)
+                {
+                    Logger.Log($"Copying password for item: {item.name}", LogLevel.Debug);
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        using (password)
+                        {
+                            CopySecureStringToClipboard(password);
+                            if (_settings.NotifyOnPasswordCopy)
+                            {
+                                _context.API.ShowMsg("Password Copied", $"Password for {item.name} has been copied to clipboard");
+                            }
+                        }
+                    });
+                    return true;
+                }
+                else
+                {
+                    Logger.Log($"Failed to fetch password for item: {item.name}", LogLevel.Error);
+                    Application.Current.Dispatcher.Invoke(() =>
+                    {
+                        _context.API.ShowMsg("Error", "Failed to fetch password from vault.");
+                    });
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"Error copying password for item {item.name}", ex);
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    _context.API.ShowMsg("Error", "Failed to copy password. Check logs for details.");
+                });
+                return false;
+            }
+        }
+
+        private async Task<SecureString?> GetSecurePasswordFromCli(string itemId)
+        {
+            try
+            {
+                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/object/password/{itemId}");
+                if (response.IsSuccessStatusCode)
+                {
+                    var content = await response.Content.ReadAsStringAsync();
+                    var result = JsonConvert.DeserializeObject<JObject>(content);
+                    var passwordStr = result?["data"]?["data"]?.ToString();
+                    
+                    if (string.IsNullOrEmpty(passwordStr))
+                        return null;
+
+                    // Convert to SecureString
+                    var securePassword = new SecureString();
+                    foreach (char c in passwordStr)
+                    {
+                        securePassword.AppendChar(c);
+                    }
+                    securePassword.MakeReadOnly();
+
+                    // Clear the password string from memory
+                    Array.Clear(passwordStr.ToCharArray(), 0, passwordStr.Length);
+                    
+                    return securePassword;
+                }
+                
+                Logger.Log($"Failed to fetch password. Status code: {response.StatusCode}", LogLevel.Error);
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error fetching password from CLI", ex);
+                return null;
+            }
+        }
+
+        private void CopySecureStringToClipboard(SecureString secureString)
+        {
+            IntPtr unmanagedString = IntPtr.Zero;
+            try
+            {
+                unmanagedString = Marshal.SecureStringToGlobalAllocUnicode(secureString);
+                string password = Marshal.PtrToStringUni(unmanagedString) ?? string.Empty;
+
+                Application.Current.Dispatcher.Invoke(() =>
+                {
+                    try
+                    {
+                        Clipboard.SetText(password);
+                        SetupClipboardClearTimer();
+                    }
+                    finally
+                    {
+                        // Clear the string from memory
+                        Array.Clear(password.ToCharArray(), 0, password.Length);
+                    }
+                });
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error copying secure string to clipboard", ex);
+                throw;
+            }
+            finally
+            {
+                if (unmanagedString != IntPtr.Zero)
+                {
+                    Marshal.ZeroFreeGlobalAllocUnicode(unmanagedString);
+                }
+            }
+        }
         
         public void Dispose()
         {
@@ -2055,6 +2170,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
             set => _rawHasTotp = value;
         }
+
+        [JsonProperty("reprompt")]
+        public int reprompt { get; set; }
     }
 
     public class BitwardenLogin

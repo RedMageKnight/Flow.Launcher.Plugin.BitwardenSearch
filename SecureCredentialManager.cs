@@ -20,6 +20,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         [DllImport("advapi32.dll", SetLastError = true)]
         private static extern bool CredDeleteW(string target, uint type, int flags);
+        private const string DEFAULT_CREDENTIAL_NAME = "BitwardenFlowPlugin";
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
         private struct CREDENTIAL
@@ -40,6 +41,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public static void SaveCredential(string username, SecureString password)
         {
+            SaveCredential(username, password, DEFAULT_CREDENTIAL_NAME);
+        }
+
+        public static void SaveCredential(string username, SecureString password, string credentialName)
+        {
             var passwordPtr = IntPtr.Zero;
             try
             {
@@ -47,7 +53,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 var credential = new CREDENTIAL
                 {
                     Type = 1, // CRED_TYPE_GENERIC
-                    TargetName = CredentialType,
+                    TargetName = credentialName,
                     CredentialBlobSize = (uint)password.Length * 2,
                     CredentialBlob = passwordPtr,
                     Persist = 2, // CRED_PERSIST_LOCAL_MACHINE
@@ -70,10 +76,15 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public static SecureString? RetrieveCredential(string username)
         {
+            return RetrieveCredential(username, DEFAULT_CREDENTIAL_NAME);
+        }
+        
+        public static SecureString? RetrieveCredential(string username, string credentialName)
+        {
             IntPtr credentialPtr = IntPtr.Zero;
             try
             {
-                if (!CredReadW(CredentialType, 1, 0, out credentialPtr))
+                if (!CredReadW(credentialName, 1, 0, out credentialPtr))
                 {
                     return null;
                 }
@@ -107,7 +118,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public static void DeleteCredential()
         {
-            if (!CredDeleteW(CredentialType, 1, 0))
+            DeleteCredential(DEFAULT_CREDENTIAL_NAME);
+        }
+        
+        public static void DeleteCredential(string credentialName)
+        {
+            if (!CredDeleteW(credentialName, 1, 0))
             {
                 throw new Exception($"Failed to delete credential. Error code: {Marshal.GetLastWin32Error()}");
             }

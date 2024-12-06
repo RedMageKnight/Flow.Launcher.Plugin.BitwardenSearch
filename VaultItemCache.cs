@@ -16,6 +16,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         public bool HasTotp { get; set; }
         public List<string> Uris { get; set; } = new List<string>();
         public DateTime CacheTime { get; set; }
+        public int Reprompt { get; set; }
     }
 
     public class VaultItemCache
@@ -105,8 +106,10 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         Username = item.login?.username,
                         HasTotp = item.hasTotp,
                         Uris = item.login?.uris?.Select(u => u.uri).ToList() ?? new List<string>(),
-                        CacheTime = DateTime.Now
+                        CacheTime = DateTime.Now,
+                        Reprompt = item.reprompt
                     };
+                    Logger.Log($"Caching item {item.name} with reprompt value: {item.reprompt}", LogLevel.Debug);
                     _cache[item.id] = cachedItem;
                 }
                 SaveCache();
@@ -126,16 +129,21 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         item.Name.ToLower().Contains(searchTermLower) ||
                         (item.Username?.ToLower().Contains(searchTermLower) ?? false) ||
                         item.Uris.Any(uri => uri.ToLower().Contains(searchTermLower)))
-                    .Select(item => new BitwardenItem
+                    .Select(item =>
                     {
-                        id = item.Id,
-                        name = item.Name,
-                        hasTotp = item.HasTotp,
-                        login = new BitwardenLogin
+                        Logger.Log($"Returning cached item {item.Name} with reprompt value: {item.Reprompt}", LogLevel.Debug);
+                        return new BitwardenItem
                         {
-                            username = item.Username,
-                            uris = item.Uris.Select(uri => new BitwardenUri { uri = uri }).ToList()
-                        }
+                            id = item.Id,
+                            name = item.Name,
+                            hasTotp = item.HasTotp,
+                            reprompt = item.Reprompt,
+                            login = new BitwardenLogin
+                            {
+                                username = item.Username,
+                                uris = item.Uris.Select(uri => new BitwardenUri { uri = uri }).ToList()
+                            }
+                        };
                     })
                     .ToList();
             }
