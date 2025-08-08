@@ -89,6 +89,17 @@
                     FontWeight="Bold" 
                     Margin="0,0,0,10"/>
             
+            <!-- Official Server Selection -->
+            <TextBlock Text="Official Bitwarden Server:" FontWeight="SemiBold" Margin="0,0,0,5"/>
+            <ComboBox x:Name="OfficialServerComboBox" 
+                    Width="200" 
+                    HorizontalAlignment="Left"
+                    Margin="0,0,0,15"
+                    SelectionChanged="OfficialServerComboBox_SelectionChanged">
+                <ComboBoxItem Content="bitwarden.com (US)" Tag="com"/>
+                <ComboBoxItem Content="bitwarden.eu (Europe)" Tag="eu"/>
+            </ComboBox>
+            
             <CheckBox x:Name="UseCustomServerCheckBox" 
                     Content="Use Self-Hosted Instance" 
                     Margin="0,0,0,10"

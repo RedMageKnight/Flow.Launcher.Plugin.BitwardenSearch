@@ -32,8 +32,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
     public class BitwardenCliConfigManager
     {
-        private const string DEFAULT_SERVER_URL = "https://vault.bitwarden.com";
-
         public static async Task<string?> GetCurrentServerUrl()
         {
             try
@@ -150,21 +148,38 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        public static async Task<bool> ResetToDefaultServer()
+        public static async Task<bool> ConfigureOfficialServer(string region)
         {
             try
             {
-                Logger.Log("Resetting to default Bitwarden server", LogLevel.Info);
+                var serverUrl = BitwardenConstants.GetOfficialServerUrl(region);
+                Logger.Log($"Configuring official Bitwarden server: {serverUrl}", LogLevel.Info);
                 
-                // First logout
+                // Stop any running Bitwarden server processes
+                StopBitwardenServer();
+
+                // Always logout first before changing server configuration
                 if (!await LogoutIfRequired())
+                {
+                    Logger.Log("Failed to logout before server configuration change", LogLevel.Error);
+                    return false;
+                }
+
+                // Clear session environment variable
+                Environment.SetEnvironmentVariable("BW_SESSION", null);
+
+                // Configure server
+                if (!await ExecuteConfigCommand("server", serverUrl))
                     return false;
 
-                return await ExecuteConfigCommand("server", BitwardenConstants.DEFAULT_SERVER_URL);
+                // Ensure there's a delay before any subsequent operations
+                await Task.Delay(1000);
+
+                return true;
             }
             catch (Exception ex)
             {
-                Logger.LogError("Failed to reset to default server", ex);
+                Logger.LogError("Failed to configure official server", ex);
                 return false;
             }
         }

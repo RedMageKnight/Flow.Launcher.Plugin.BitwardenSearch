@@ -297,6 +297,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             Logger.Log("Verifying and applying settings", LogLevel.Info);
 
+            // Configure server based on settings
+            await ConfigureServerFromSettings();
+
             if (string.IsNullOrEmpty(_settings.ClientId))
             {
                 Logger.Log("Client ID is not set", LogLevel.Warning);
@@ -356,6 +359,48 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
             Logger.Log("Settings verified and applied successfully", LogLevel.Info);
             return true;
+        }
+
+        private async Task ConfigureServerFromSettings()
+        {
+            try
+            {
+                if (_settings.UseCustomServer)
+                {
+                    // Use custom server configuration
+                    if (!string.IsNullOrEmpty(_settings.CustomServerUrl))
+                    {
+                        var config = new BitwardenCliConfig
+                        {
+                            BaseUrl = _settings.CustomServerUrl,
+                            IdentityUrl = _settings.CustomIdentityUrl,
+                            ApiUrl = _settings.CustomApiUrl,
+                            NotificationsUrl = _settings.CustomNotificationsUrl,
+                            WebVaultUrl = _settings.CustomWebVaultUrl,
+                            IconsUrl = _settings.CustomIconsUrl,
+                            KeysUrl = _settings.CustomKeysUrl
+                        };
+                        await BitwardenCliConfigManager.ConfigureServer(config);
+                        Logger.Log($"Configured custom server: {_settings.CustomServerUrl}", LogLevel.Info);
+                    }
+                }
+                else
+                {
+                    // Use official server based on region setting
+                    var currentServerUrl = await BitwardenCliConfigManager.GetCurrentServerUrl();
+                    var expectedServerUrl = BitwardenConstants.GetOfficialServerUrl(_settings.OfficialServerRegion);
+                    
+                    if (currentServerUrl != expectedServerUrl)
+                    {
+                        await BitwardenCliConfigManager.ConfigureOfficialServer(_settings.OfficialServerRegion);
+                        Logger.Log($"Configured official server: {expectedServerUrl}", LogLevel.Info);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Failed to configure server from settings", ex);
+            }
         }
 
         private void SetupAutoLockTimer()

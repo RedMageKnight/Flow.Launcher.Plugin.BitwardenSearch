@@ -17,6 +17,9 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         [JsonProperty("sessionKey")]
         public string SessionKey { get; set; } = string.Empty;
 
+        [JsonProperty("officialServerRegion")]
+        public string OfficialServerRegion { get; set; } = "com"; // "com" or "eu"
+
         [JsonProperty("useCustomServer")]
         public bool UseCustomServer { get; set; } = false;
 

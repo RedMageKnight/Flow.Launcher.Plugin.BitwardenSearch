@@ -82,6 +82,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             ClipboardClearComboBox.SelectedIndex = GetIndexFromSeconds(_settings.ClipboardClearSeconds);
 
             InitializeServerConfig();
+            InitializeOfficialServerSelection();
         }
 
         private void AutoLockComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -662,6 +663,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 ServerConfigPanel.Visibility = _settings.UseCustomServer ? Visibility.Visible : Visibility.Collapsed;
             }
 
+            // Enable/disable official server selection
+            if (OfficialServerComboBox != null)
+            {
+                OfficialServerComboBox.IsEnabled = !_settings.UseCustomServer;
+            }
+
             // Clear credentials when switching servers
             if (ClientIdTextBox != null)
             {
@@ -695,7 +702,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 // Try to load existing server configuration
                 var currentServerUrl = await BitwardenCliConfigManager.GetCurrentServerUrl();
-                if (!string.IsNullOrEmpty(currentServerUrl) && currentServerUrl != BitwardenConstants.DEFAULT_SERVER_URL)
+                if (!string.IsNullOrEmpty(currentServerUrl) && currentServerUrl != BitwardenConstants.DEFAULT_SERVER_URL && currentServerUrl != BitwardenConstants.EU_SERVER_URL)
                 {
                     if (BaseUrlTextBox != null) BaseUrlTextBox.Text = currentServerUrl;
                     if (ServerConfigStatusTextBlock != null)
@@ -709,19 +716,19 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             {
                 if (ServerConfigStatusTextBlock != null)
                 {
-                    ServerConfigStatusTextBlock.Text = "Resetting to default server...";
+                    ServerConfigStatusTextBlock.Text = "Switching to selected official server...";
                     ServerConfigStatusTextBlock.Foreground = Brushes.Gray;
                 }
 
-                var config = new BitwardenCliConfig { BaseUrl = null };
-                var success = await BitwardenCliConfigManager.ConfigureServer(config);
+                // Use the currently selected official server
+                var success = await BitwardenCliConfigManager.ConfigureOfficialServer(_settings.OfficialServerRegion);
                 
                 if (success)
                 {
                     ClearServerConfigFields();
                     if (ServerConfigStatusTextBlock != null)
                     {
-                        ServerConfigStatusTextBlock.Text = "Reset to default Bitwarden server. You will need to log in again.";
+                        ServerConfigStatusTextBlock.Text = $"Switched to {(_settings.OfficialServerRegion == "eu" ? "EU" : "US")} server. You will need to log in again.";
                         ServerConfigStatusTextBlock.Foreground = Brushes.Green;
                     }
                 }
@@ -729,7 +736,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     if (ServerConfigStatusTextBlock != null)
                     {
-                        ServerConfigStatusTextBlock.Text = "Failed to reset to default server. Please try logging out manually.";
+                        ServerConfigStatusTextBlock.Text = "Failed to switch to official server. Please try logging out manually.";
                         ServerConfigStatusTextBlock.Foreground = Brushes.Red;
                     }
                 }
@@ -821,6 +828,108 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             if (IconsUrlTextBox != null) IconsUrlTextBox.Text = string.Empty;
             if (KeysUrlTextBox != null) KeysUrlTextBox.Text = string.Empty;
             if (ServerConfigStatusTextBlock != null) ServerConfigStatusTextBlock.Text = string.Empty;
+        }
+
+        private void InitializeOfficialServerSelection()
+        {
+            if (_settings == null || OfficialServerComboBox == null) return;
+
+            // Set the current selection based on settings
+            if (_settings.OfficialServerRegion == "eu")
+            {
+                OfficialServerComboBox.SelectedIndex = 1; // EU server
+            }
+            else
+            {
+                OfficialServerComboBox.SelectedIndex = 0; // US server (default)
+            }
+
+            // Disable if using custom server
+            OfficialServerComboBox.IsEnabled = !_settings.UseCustomServer;
+        }
+
+        private async void OfficialServerComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_settings == null || _updateSettings == null || OfficialServerComboBox == null) return;
+            
+            var selectedItem = OfficialServerComboBox.SelectedItem as ComboBoxItem;
+            if (selectedItem == null) return;
+
+            var newRegion = selectedItem.Tag?.ToString() ?? "com";
+            
+            // Only proceed if the region actually changed
+            if (_settings.OfficialServerRegion == newRegion) return;
+
+            _settings.OfficialServerRegion = newRegion;
+
+            // Don't apply server configuration if using custom server
+            if (_settings.UseCustomServer) 
+            {
+                _updateSettings.Invoke(_settings);
+                return;
+            }
+
+            // Clear credentials when switching servers
+            if (ClientIdTextBox != null)
+            {
+                ClientIdTextBox.Text = string.Empty;
+                _settings.ClientId = string.Empty;
+            }
+            
+            if (ClientSecretBox != null)
+            {
+                ClientSecretBox.Password = string.Empty;
+            }
+
+            // Clear any stored credentials
+            try
+            {
+                SecureCredentialManager.DeleteCredential();
+                Logger.Log("Cleared stored credentials when switching official server", LogLevel.Debug);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Error clearing stored credentials", ex);
+            }
+
+            if (ServerConfigStatusTextBlock != null)
+            {
+                ServerConfigStatusTextBlock.Text = $"Switching to {(newRegion == "eu" ? "EU" : "US")} server...";
+                ServerConfigStatusTextBlock.Foreground = Brushes.Gray;
+            }
+
+            try
+            {
+                var success = await BitwardenCliConfigManager.ConfigureOfficialServer(newRegion);
+                
+                if (success)
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = $"Successfully switched to {(newRegion == "eu" ? "EU" : "US")} server. Please provide your API credentials.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Green;
+                    }
+                }
+                else
+                {
+                    if (ServerConfigStatusTextBlock != null)
+                    {
+                        ServerConfigStatusTextBlock.Text = "Failed to switch server. Please try again.";
+                        ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (ServerConfigStatusTextBlock != null)
+                {
+                    ServerConfigStatusTextBlock.Text = $"Error switching server: {ex.Message}";
+                    ServerConfigStatusTextBlock.Foreground = Brushes.Red;
+                }
+                Logger.LogError("Failed to switch official server", ex);
+            }
+
+            _updateSettings.Invoke(_settings);
         }
 
         private void InitializeServerConfig()
