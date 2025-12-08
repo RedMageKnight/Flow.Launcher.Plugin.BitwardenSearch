@@ -2,10 +2,10 @@ using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using System.Net.Http;
-using System.Linq;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
@@ -95,7 +95,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                             .Select(u => u.uri)
                             .FirstOrDefault(u => u.StartsWith("http://") || u.StartsWith("https://"));
 
-                        if (!string.IsNullOrEmpty(webUri))
+                        if (!string.IsNullOrEmpty(webUri) && UrlValidator.IsDomainUrl(webUri))
                         {
                             await _throttler.WaitAsync();
                             tasks.Add(Task.Run(async () =>
