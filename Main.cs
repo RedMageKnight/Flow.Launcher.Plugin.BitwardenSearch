@@ -538,8 +538,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log("Starting UnlockVault method", LogLevel.Debug);
 
             // Try unlocking with different quoting methods, prioritizing single quotes
-            if (await TryUnlock(masterPassword, QuoteMethod.Single) ||
-                await TryUnlock(masterPassword, QuoteMethod.Double))
+            if (await TryUnlock(masterPassword))
             {
                 UpdateHttpClientAuthorization();
                 SetEnvironmentSessionKey(_settings.SessionKey);
@@ -588,7 +587,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log("BW_SESSION environment variable cleared", LogLevel.Debug);
         }
 
-        private async Task<bool> TryUnlock(string masterPassword, QuoteMethod quoteMethod)
+        private async Task<bool> TryUnlock(string masterPassword)
         {
             try
             {
@@ -610,7 +609,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     }
                 };
 
-                Logger.Log($"Starting Bitwarden CLI unlock process with {quoteMethod} quoting", LogLevel.Debug);
+                Logger.Log($"Starting Bitwarden CLI unlock process", LogLevel.Debug);
                 unlockProcess.Start();
 
                 string unlockOutput = await unlockProcess.StandardOutput.ReadToEndAsync();
@@ -621,11 +620,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Environment.SetEnvironmentVariable("BW_PASSWORD", null, EnvironmentVariableTarget.Process);
                 
                 // Log completion without revealing sensitive information
-                Logger.Log($"Unlock process completed for {quoteMethod} quoting", LogLevel.Debug);
+                Logger.Log($"Unlock process complete", LogLevel.Debug);
 
                 if (!string.IsNullOrEmpty(unlockError))
                 {
-                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
+                    Logger.Log($"Error during unlock: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
                     return false;
                 }
 
@@ -639,18 +638,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 else
                 {
-                    Logger.Log($"Failed to extract session key with {quoteMethod} quoting", LogLevel.Error);
+                    Logger.Log("Failed to extract session key", LogLevel.Error);
                     return false;
                 }
             }
             catch (OperationCanceledException)
             {
-                Logger.Log($"Unlock operation timed out with {quoteMethod} quoting", LogLevel.Error);
+                Logger.Log("Unlock operation timed out", LogLevel.Error);
                 return false;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Exception during unlock process with {quoteMethod} quoting", ex);
+                Logger.LogError("Exception during unlock process", ex);
                 return false;
             }
         }
@@ -2173,12 +2172,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             GC.SuppressFinalize(this);
         }
         
-        private enum QuoteMethod
-        {
-            Single,
-            Double,
-        }
-
         private enum ActionType
         {
             Default,
