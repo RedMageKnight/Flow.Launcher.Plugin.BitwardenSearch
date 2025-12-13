@@ -1,27 +1,30 @@
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Security;
 using System.Threading;
-using System.Windows.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Linq;
-using Newtonsoft.Json.Linq;
-using System.Diagnostics;
-using System.IO;
-using Newtonsoft.Json;
-using System.Security;
-using System.Net.Sockets;
 using System.Windows.Input;
-using System.Runtime.InteropServices;
+using System.Windows.Threading;
 
 namespace Flow.Launcher.Plugin.BitwardenSearch
 {
     public class Main : IAsyncPlugin, ISettingProvider, IDisposable, IContextMenu
     {
-        private readonly HttpClient _httpClient;
-        private const string ApiBaseUrl = "http://localhost:8087"; // Bitwarden CLI server URL
+        private readonly HttpClient _httpClientLocalhost;
+        private readonly HttpClient _httpClientDefault;
+        private const string ApiBaseUrl = "http://127.0.0.1:8087"; // Bitwarden CLI server URL
         private Process? _serveProcess;
         private bool _isInitialized = false;
         private readonly SemaphoreSlim _initializationLock = new SemaphoreSlim(1, 1);
@@ -33,6 +36,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         private BitwardenFlowSettings _settings = null!;
         private bool _isLocked = false;
         private bool _needsInitialSetup = false;
+        private volatile bool _isCliInstalled = false;
         private SecureString? _clientSecret;
         private string _selectedItemId = string.Empty;
         private IconCacheManager? _iconCacheManager;
@@ -47,11 +51,13 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
         public Main()
         {
-            _httpClient = new HttpClient
-            {
-                Timeout = TimeSpan.FromSeconds(10)
-            };
-            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            _httpClientDefault = new HttpClient(){Timeout = TimeSpan.FromSeconds(10) };
+            _httpClientDefault.DefaultRequestHeaders.Add("Accept", "application/json");
+
+            HttpClientHandler httpClientHandler = new HttpClientHandler(){UseProxy = false};
+            _httpClientLocalhost = new HttpClient(httpClientHandler) { Timeout = TimeSpan.FromSeconds(10) };
+            _httpClientLocalhost.DefaultRequestHeaders.Add("Accept", "application/json");
+
             _debounceTokenSource = new CancellationTokenSource();
             _isLocked = true; // Initialize as locked
 
@@ -64,7 +70,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 try
                 {
                     Directory.CreateDirectory(_faviconCacheDir);
-                    _iconCacheManager = new IconCacheManager(_faviconCacheDir, _httpClient);
+                    _iconCacheManager = new IconCacheManager(_faviconCacheDir,_httpClientDefault);
                     Logger.Log($"Favicon cache directory created: {_faviconCacheDir}", LogLevel.Info);
                 }
                 catch (Exception ex)
@@ -235,10 +241,11 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             }
         }
 
-        public static bool IsBitwardenCliInstalled()
+        public bool IsBitwardenCliInstalled()
         {
             try
             {
+                if (_isCliInstalled) return true;
                 using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -259,6 +266,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 if (!string.IsNullOrEmpty(output))
                 {
                     Logger.Log($"Bitwarden CLI found. Version: {output.Trim()}", LogLevel.Info);
+                    _isCliInstalled = true;
                     return true;
                 }
                 else if (!string.IsNullOrEmpty(error))
@@ -475,7 +483,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                     return true;
                 }
 
-                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/status");
+                var response = await _httpClientLocalhost.GetAsync($"{ApiBaseUrl}/status");
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
@@ -530,9 +538,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log("Starting UnlockVault method", LogLevel.Debug);
 
             // Try unlocking with different quoting methods, prioritizing single quotes
-            if (await TryUnlock(masterPassword, QuoteMethod.Single) ||
-                await TryUnlock(masterPassword, QuoteMethod.Double) ||
-                await TryUnlock(masterPassword, QuoteMethod.None))
+            if (await TryUnlock(masterPassword))
             {
                 UpdateHttpClientAuthorization();
                 SetEnvironmentSessionKey(_settings.SessionKey);
@@ -581,20 +587,14 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             Logger.Log("BW_SESSION environment variable cleared", LogLevel.Debug);
         }
 
-        private async Task<bool> TryUnlock(string masterPassword, QuoteMethod quoteMethod)
+        private async Task<bool> TryUnlock(string masterPassword)
         {
             try
             {
+                //bw unlock --passwordenv BW_PASSWORD --raw
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-                string arguments = quoteMethod switch
-                {
-                    QuoteMethod.None => $"unlock {masterPassword} --raw",
-                    QuoteMethod.Single => $"unlock '{masterPassword}' --raw",
-                    QuoteMethod.Double => $"unlock \"{masterPassword}\" --raw",
-                    _ => throw new ArgumentOutOfRangeException(nameof(quoteMethod))
-                };
-
+                Environment.SetEnvironmentVariable("BW_PASSWORD", masterPassword, EnvironmentVariableTarget.Process);
+                string arguments = "unlock --passwordenv BW_PASSWORD --raw";
                 var unlockProcess = new Process
                 {
                     StartInfo = new ProcessStartInfo
@@ -604,24 +604,27 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                         UseShellExecute = false,
                         RedirectStandardOutput = true,
                         RedirectStandardError = true,
-                        CreateNoWindow = true
+                        CreateNoWindow = true,
+                        ErrorDialog = false,
                     }
                 };
 
-                Logger.Log($"Starting Bitwarden CLI unlock process with {quoteMethod} quoting", LogLevel.Debug);
+                Logger.Log($"Starting Bitwarden CLI unlock process", LogLevel.Debug);
                 unlockProcess.Start();
 
                 string unlockOutput = await unlockProcess.StandardOutput.ReadToEndAsync();
                 string unlockError = await unlockProcess.StandardError.ReadToEndAsync();
 
                 await unlockProcess.WaitForExitAsync(cts.Token);
-
+                // Reset Variable
+                Environment.SetEnvironmentVariable("BW_PASSWORD", null, EnvironmentVariableTarget.Process);
+                
                 // Log completion without revealing sensitive information
-                Logger.Log($"Unlock process completed for {quoteMethod} quoting", LogLevel.Debug);
+                Logger.Log($"Unlock process complete", LogLevel.Debug);
 
                 if (!string.IsNullOrEmpty(unlockError))
                 {
-                    Logger.Log($"Error during unlock with {quoteMethod} quoting: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
+                    Logger.Log($"Error during unlock: {SanitizeErrorMessage(unlockError, masterPassword)}", LogLevel.Error);
                     return false;
                 }
 
@@ -635,18 +638,18 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 }
                 else
                 {
-                    Logger.Log($"Failed to extract session key with {quoteMethod} quoting", LogLevel.Error);
+                    Logger.Log("Failed to extract session key", LogLevel.Error);
                     return false;
                 }
             }
             catch (OperationCanceledException)
             {
-                Logger.Log($"Unlock operation timed out with {quoteMethod} quoting", LogLevel.Error);
+                Logger.Log("Unlock operation timed out", LogLevel.Error);
                 return false;
             }
             catch (Exception ex)
             {
-                Logger.LogError($"Exception during unlock process with {quoteMethod} quoting", ex);
+                Logger.LogError("Exception during unlock process", ex);
                 return false;
             }
         }
@@ -942,8 +945,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 {
                     try
                     {
-                        using var testClient = new HttpClient();
-                        var response = await testClient.GetAsync($"{ApiBaseUrl}/status", cts.Token);
+                        var response = await _httpClientLocalhost.GetAsync($"{ApiBaseUrl}/status", HttpCompletionOption.ResponseContentRead,cts.Token);
                         if (response.IsSuccessStatusCode)
                         {
                             Logger.Log("Bitwarden server started successfully", LogLevel.Info);
@@ -1045,12 +1047,12 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             if (!string.IsNullOrEmpty(_settings.SessionKey))
             {
-                _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.SessionKey.Trim());
+                _httpClientLocalhost.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _settings.SessionKey.Trim());
                 Logger.Log("Session key updated", LogLevel.Info);
             }
             else
             {
-                _httpClient.DefaultRequestHeaders.Authorization = null;
+                _httpClientLocalhost.DefaultRequestHeaders.Authorization = null;
                 Logger.Log("Authorization cleared due to missing session key", LogLevel.Info);
             }
         }
@@ -1307,7 +1309,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 // Step 1: Sync the vault
                 Logger.Log("Starting vault synchronization", LogLevel.Info);
-                var syncResponse = await _httpClient.PostAsync($"{ApiBaseUrl}/sync", null);
+                var syncResponse = await _httpClientLocalhost.PostAsync($"{ApiBaseUrl}/sync", null);
                 
                 if (!syncResponse.IsSuccessStatusCode)
                 {
@@ -1319,7 +1321,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
                 Logger.Log("Vault synchronization completed successfully", LogLevel.Info);
 
                 // Step 2: Fetch all items
-                var itemsResponse = await _httpClient.GetAsync($"{ApiBaseUrl}/list/object/items");
+                var itemsResponse = await _httpClientLocalhost.GetAsync($"{ApiBaseUrl}/list/object/items");
                 
                 if (!itemsResponse.IsSuccessStatusCode)
                 {
@@ -1476,7 +1478,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
 
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/object/item/{itemId}");
+                var response = await _httpClientLocalhost.GetAsync($"{ApiBaseUrl}/object/item/{itemId}");
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
@@ -1706,7 +1708,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             var url = $"{ApiBaseUrl}/object/totp/{itemId}";
             Logger.Log($"Fetching TOTP code for item {itemId}", LogLevel.Debug);
             
-            var response = await _httpClient.GetAsync(url);
+            var response = await _httpClientLocalhost.GetAsync(url);
             
             if (response.IsSuccessStatusCode)
             {
@@ -1808,7 +1810,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             if (disposing)
             {
-                _httpClient.Dispose();
+                _httpClientLocalhost.Dispose();
         
                 // Dispose of the Bitwarden server process
                 if (_serveProcess != null)
@@ -2094,7 +2096,7 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
         {
             try
             {
-                var response = await _httpClient.GetAsync($"{ApiBaseUrl}/object/password/{itemId}");
+                var response = await _httpClientLocalhost.GetAsync($"{ApiBaseUrl}/object/password/{itemId}");
                 if (response.IsSuccessStatusCode)
                 {
                     var content = await response.Content.ReadAsStringAsync();
@@ -2170,13 +2172,6 @@ namespace Flow.Launcher.Plugin.BitwardenSearch
             GC.SuppressFinalize(this);
         }
         
-        private enum QuoteMethod
-        {
-            Single,
-            Double,
-            None
-        }
-
         private enum ActionType
         {
             Default,

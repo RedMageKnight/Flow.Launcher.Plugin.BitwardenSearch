@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net7.0-windows</TargetFramework>
     <AssemblyName>Flow.Launcher.Plugin.BitwardenSearch</AssemblyName>
@@ -22,6 +22,7 @@
 
   <PropertyGroup>
     <CleanBeforeBuild>true</CleanBeforeBuild>
+    <RunPostBuildEvent>OnOutputUpdated</RunPostBuildEvent>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -53,13 +54,25 @@
     <Compile Update="BitwardenFlowSettingPanel.xaml.cs">
       <DependentUpon>BitwardenFlowSettingPanel.xaml</DependentUpon>
     </Compile>
+    <Compile Update="Properties\Settings.Designer.cs">
+      <DesignTimeSharedInput>True</DesignTimeSharedInput>
+      <AutoGen>True</AutoGen>
+      <DependentUpon>Settings.settings</DependentUpon>
+    </Compile>
     <Compile Update="UriListWindow.xaml.cs">
       <DependentUpon>UriListWindow.xaml</DependentUpon>
     </Compile>
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="Properties\Settings.settings">
+      <Generator>SettingsSingleFileGenerator</Generator>
+      <LastGenOutput>Settings.Designer.cs</LastGenOutput>
+    </None>
+  </ItemGroup>
+
   <Target Name="PreBuild" BeforeTargets="PreBuildEvent" Condition="'$(CI)' != 'true'">
-    <Exec Command="powershell.exe -ExecutionPolicy Bypass -Command &quot;&amp; {Start-Process PowerShell.exe -ArgumentList '-ExecutionPolicy Bypass -File \&quot;$(ProjectDir)pre-build-cleanup.ps1\&quot;' -Verb RunAs -Wait}&quot;" />
+    <Exec Command="powershell -Command &quot;Get-Process Flow.Launcher -ErrorAction SilentlyContinue | Stop-Process -Force; exit 0&quot;" />
   </Target>
 
   <Target Name="CopyPluginToFlowLauncherDirectory" AfterTargets="Build">
@@ -85,9 +98,5 @@
       <PluginFiles Include="$(OutputPath)**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(PluginFiles)" DestinationFolder="$(FlowLauncherPluginsDirectory)$(PluginOutputDirectory)\%(RecursiveDir)" />
-  </Target>
-
-  <Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(CI)' != 'true'">
-    <Exec Command="type C:\Temp\pre-build-cleanup.log" />
   </Target>
 </Project>
