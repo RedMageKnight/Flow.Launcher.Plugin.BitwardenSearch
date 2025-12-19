@@ -1,5 +1,9 @@
 <h1>Flow Launcher - Bitwarden Vault Plugin</h1>
 
+<h3>This project is officially archived - I would not recommend using it in its current state as I can no longer maintain it as I no longer have the time nor use Bitwarden as a password manager these days.
+<br><br>Please feel free to fork it and use it as your own, tweak it, modify it, add features, and submit it to the Flow Launcher repository. I'm sorry for any inconvenience this may cause.</h3>
+<h2></h2>
+
 This is a Flow Launcher plugin for Bitwarden - an application I like to use for password management. I noticed there wasn't a plugin to provide this functionality, so I thought I'd make one myself.<br><br>
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
