@@ -4,7 +4,7 @@ This is a Flow Launcher plugin for Bitwarden - an application I like to use for 
 This is my first ever Flow Launcher plugin, so I am open to suggestions/critique on ways I can improve this.
 
 <h2>Features</h2>
-As of this release (<b>2.2.1</b>), it contains the following capabilities:<br><br>
+As of this release (<b>2.1.0</b>), it contains the following capabilities:<br><br>
 
 1) Search across your entire vault from within Flow Launcher.
    - Icon population for each vault item if you have a URL associated with that item and it resolves and can produce a favicon.
