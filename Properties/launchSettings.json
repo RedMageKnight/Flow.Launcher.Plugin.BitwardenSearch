@@ -1,9 +1,0 @@
-{
-  "profiles": {
-    "Flow.Launcher.Plugin.Bitwarden": {
-        "commandName": "Executable",
-        "executablePath": "%LOCALAPPDATA%\\FlowLauncher\\app-2.0.3\\Flow.Launcher.exe",
-        "workingDirectory": "%LOCALAPPDATA%\\FlowLauncher"
-    }
-  }
-}
